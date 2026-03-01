@@ -1,5 +1,3 @@
-/// Kategori modeli
-/// API'den gelen kategori verisini temsil eder.
 class Category {
   final int id;
   final String code;
@@ -30,13 +28,12 @@ class Category {
       icon: json['icon'],
       color: json['color'],
       sortOrder: int.tryParse(json['sort_order']?.toString() ?? '0') ?? 0,
-      indicatorCount: int.tryParse(json['indicator_count']?.toString() ?? '0') ?? 0,
+      indicatorCount:
+          int.tryParse(json['indicator_count']?.toString() ?? '0') ?? 0,
     );
   }
 }
 
-/// Gösterge modeli
-/// Bir ekonomik veri serisini temsil eder (ör: TÜFE, USD/TRY).
 class Indicator {
   final int id;
   final int categoryId;
@@ -44,6 +41,7 @@ class Indicator {
   final String nameTr;
   final String nameEn;
   final String? descriptionTr;
+  final String? educationTr; // ★ Hafta 2: JSON eğitim içeriği
   final String unit;
   final String frequency;
   final String source;
@@ -60,6 +58,7 @@ class Indicator {
     required this.nameTr,
     required this.nameEn,
     this.descriptionTr,
+    this.educationTr, // ★
     required this.unit,
     required this.frequency,
     this.source = 'TCMB',
@@ -78,10 +77,12 @@ class Indicator {
       nameTr: json['name_tr'] ?? json['name'] ?? '',
       nameEn: json['name_en'] ?? '',
       descriptionTr: json['description_tr'],
+      educationTr: json['education_tr'], // ★
       unit: json['unit'] ?? '',
       frequency: json['frequency'] ?? 'monthly',
       source: json['source'] ?? 'TCMB',
-      decimalPlaces: int.tryParse(json['decimal_places']?.toString() ?? '2') ?? 2,
+      decimalPlaces:
+          int.tryParse(json['decimal_places']?.toString() ?? '2') ?? 2,
       lastValue: double.tryParse(json['last_value']?.toString() ?? ''),
       lastValueDate: json['last_value_date'],
       categoryNameTr: json['category_name_tr'],
@@ -89,14 +90,12 @@ class Indicator {
     );
   }
 
-  /// Son değeri formatlı string olarak döner
   String get formattedLastValue {
     if (lastValue == null) return 'Veri yok';
     return lastValue!.toStringAsFixed(decimalPlaces);
   }
 }
 
-/// Zaman serisi veri noktası
 class DataPoint {
   final DateTime date;
   final double value;
@@ -111,12 +110,11 @@ class DataPoint {
   }
 
   Map<String, dynamic> toJson() => {
-    'date': date.toIso8601String().split('T')[0],
-    'value': value,
-  };
+        'date': date.toIso8601String().split('T')[0],
+        'value': value,
+      };
 }
 
-/// Zaman serisi - Bir göstergenin veri seti
 class TimeSeries {
   final Indicator indicator;
   final List<DataPoint> data;
@@ -132,10 +130,8 @@ class TimeSeries {
 
   factory TimeSeries.fromJson(Map<String, dynamic> json) {
     final indicator = Indicator.fromJson(json['indicator']);
-    final dataList = (json['data'] as List)
-        .map((d) => DataPoint.fromJson(d))
-        .toList();
-
+    final dataList =
+        (json['data'] as List).map((d) => DataPoint.fromJson(d)).toList();
     return TimeSeries(
       indicator: indicator,
       data: dataList,
@@ -144,17 +140,53 @@ class TimeSeries {
     );
   }
 
-  /// Seriyi Python analiz servisi formatına çevirir
   Map<String, dynamic> toAnalysisFormat() => {
-    'indicator_id': indicator.id,
-    'name': indicator.nameTr,
-    'code': indicator.evdsCode,
-    'unit': indicator.unit,
-    'data': data.map((d) => d.toJson()).toList(),
-  };
+        'indicator_id': indicator.id,
+        'name': indicator.nameTr,
+        'code': indicator.evdsCode,
+        'unit': indicator.unit,
+        'data': data.map((d) => d.toJson()).toList(),
+      };
 }
 
-/// Dashboard özet kartı
+class DashboardIndicator {
+  final int id;
+  final String name;
+  final double? value;
+  final String? date;
+  final String unit;
+  final List<double> sparkline;
+  final double? changePercent;
+
+  DashboardIndicator({
+    required this.id,
+    required this.name,
+    this.value,
+    this.date,
+    required this.unit,
+    this.sparkline = const [],
+    this.changePercent,
+  });
+
+  factory DashboardIndicator.fromJson(Map<String, dynamic> json) {
+    List<double> spark = [];
+    if (json['sparkline'] != null) {
+      spark = (json['sparkline'] as List)
+          .map((v) => double.tryParse(v.toString()) ?? 0)
+          .toList();
+    }
+    return DashboardIndicator(
+      id: int.parse(json['id'].toString()),
+      name: json['name'] ?? '',
+      value: double.tryParse(json['value']?.toString() ?? ''),
+      date: json['date'],
+      unit: json['unit'] ?? '',
+      sparkline: spark,
+      changePercent: double.tryParse(json['change_pct']?.toString() ?? ''),
+    );
+  }
+}
+
 class DashboardCategory {
   final String category;
   final String? color;
@@ -172,7 +204,6 @@ class DashboardCategory {
     final indicatorList = (json['indicators'] as List)
         .map((i) => DashboardIndicator.fromJson(i))
         .toList();
-
     return DashboardCategory(
       category: json['category'] ?? '',
       color: json['color'],
@@ -182,33 +213,6 @@ class DashboardCategory {
   }
 }
 
-class DashboardIndicator {
-  final int id;
-  final String name;
-  final double? value;
-  final String? date;
-  final String unit;
-
-  DashboardIndicator({
-    required this.id,
-    required this.name,
-    this.value,
-    this.date,
-    required this.unit,
-  });
-
-  factory DashboardIndicator.fromJson(Map<String, dynamic> json) {
-    return DashboardIndicator(
-      id: int.parse(json['id'].toString()),
-      name: json['name'] ?? '',
-      value: double.tryParse(json['value']?.toString() ?? ''),
-      date: json['date'],
-      unit: json['unit'] ?? '',
-    );
-  }
-}
-
-/// Analiz sonucu modeli
 class AnalysisResult {
   final String analysisType;
   final Map<String, dynamic> result;

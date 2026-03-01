@@ -1,16 +1,18 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:macro_dashboard/config/chart_config_builder.dart';
 
 import '../services/api_service.dart';
+import '../services/explainer_service.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../widgets/plotly_chart.dart';
 
-
 /// Grafik Detay Ekranı
 ///
-/// Tek bir göstergenin zaman serisini interaktif Plotly grafiğinde gösterir.
-/// Periyot ve grafik tipi değiştirilebilir.
-/// Trend analizi ve istatistik bilgileri de gösterilir.
+/// Hafta 2:
+///   🎓 AppBar'da "Bu ne?" toggle → eğitim kartı (education_tr JSON)
+///   💡 Grafik altında "Bana Açıkla" toggle → otomatik yorum
 class ChartScreen extends StatefulWidget {
   final int indicatorId;
   final String indicatorName;
@@ -27,6 +29,8 @@ class ChartScreen extends StatefulWidget {
 
 class _ChartScreenState extends State<ChartScreen> {
   final _api = ApiService();
+  final _chartBuilder = ChartConfigBuilder();
+  final _explainer = ExplainerService();
 
   String _period = '1y';
   String _chartType = 'line';
@@ -37,6 +41,12 @@ class _ChartScreenState extends State<ChartScreen> {
   Map<String, dynamic>? _plotlyConfig;
   Map<String, dynamic>? _trendResult;
 
+  // ★ Hafta 2 state
+  bool _showEducation = false;
+  bool _showExplain = false;
+  Map<String, dynamic>? _educationData;
+  String? _explainText;
+
   @override
   void initState() {
     super.initState();
@@ -44,61 +54,69 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+    setState(() { _isLoading = true; _error = null; });
 
     try {
-      // 1. Zaman serisi verisini çek
-      final ts = await _api.getTimeSeriesData(widget.indicatorId, period: _period);
+      final ts = await _api.getTimeSeriesData(
+        widget.indicatorId, period: _period,
+      );
       _timeSeries = ts;
 
-      // 2. Plotly grafik config'i al
-      final config = await _api.getChartConfig(
+      if (ts.data.isEmpty) {
+        setState(() { _error = 'Bu periyotta veri bulunamadı.'; _isLoading = false; });
+        return;
+      }
+
+      final config = _chartBuilder.build(
         chartType: _chartType,
         seriesData: [ts.toAnalysisFormat()],
         title: ts.indicator.nameTr,
       );
 
-      // 3. Trend analizi (arka planda)
+      // Eğitim verisi parse
+      _educationData = _parseEdu(ts.indicator.educationTr);
+
+      // Otomatik yorum üret
+      _explainText = _explainer.explain(ts);
+
       _loadTrendAnalysis();
 
-      setState(() {
-        _plotlyConfig = config;
-        _isLoading = false;
-      });
+      setState(() { _plotlyConfig = config; _isLoading = false; });
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
+      setState(() { _error = e.toString(); _isLoading = false; });
     }
+  }
+
+  Map<String, dynamic>? _parseEdu(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    try { return jsonDecode(raw) as Map<String, dynamic>; }
+    catch (_) { return null; }
   }
 
   Future<void> _loadTrendAnalysis() async {
     try {
-      final result = await _api.analyze(
+      final r = await _api.analyze(
         type: 'trend',
         indicatorIds: [widget.indicatorId],
         period: _period,
       );
-      if (mounted) {
-        setState(() => _trendResult = result.result);
-      }
-    } catch (_) {
-      // Trend analizi opsiyonel, hata varsa sessizce geç
+      if (mounted) setState(() => _trendResult = r.result);
+    } catch (_) {}
+  }
+
+  void _onPeriodChanged(String p) { _period = p; _loadData(); }
+
+  void _onChartTypeChanged(String t) {
+    if (_timeSeries != null && _timeSeries!.data.isNotEmpty) {
+      setState(() {
+        _chartType = t;
+        _plotlyConfig = _chartBuilder.build(
+          chartType: t,
+          seriesData: [_timeSeries!.toAnalysisFormat()],
+          title: _timeSeries!.indicator.nameTr,
+        );
+      });
     }
-  }
-
-  void _onPeriodChanged(String period) {
-    _period = period;
-    _loadData();
-  }
-
-  void _onChartTypeChanged(String type) {
-    _chartType = type;
-    _loadData();
   }
 
   @override
@@ -108,11 +126,20 @@ class _ChartScreenState extends State<ChartScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.indicatorName,
-          style: const TextStyle(fontSize: 16),
-        ),
+        title: Text(widget.indicatorName, style: const TextStyle(fontSize: 16)),
         actions: [
+          // 🎓 Eğitim toggle
+          if (_educationData != null)
+            IconButton(
+              icon: Icon(
+                _showEducation ? Icons.school : Icons.school_outlined,
+                size: 22,
+                color: _showEducation ? const Color(0xFF4ECDC4) : null,
+              ),
+              tooltip: 'Bu ne?',
+              onPressed: () => setState(() => _showEducation = !_showEducation),
+            ),
+          // ℹ️ Detay
           IconButton(
             icon: const Icon(Icons.info_outline, size: 20),
             onPressed: _showIndicatorInfo,
@@ -125,58 +152,224 @@ class _ChartScreenState extends State<ChartScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Son değer başlık
+                  // ── 🎓 Eğitim kartı ──
+                  if (_showEducation && _educationData != null)
+                    _buildEducationCard(),
+
+                  // ── Son değer ──
                   if (_timeSeries != null) _buildValueHeader(theme),
 
-                  // Periyot seçici
+                  // ── Periyot ──
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: PeriodSelector(
-                      selected: _period,
-                      onChanged: _onPeriodChanged,
-                    ),
+                    child: PeriodSelector(selected: _period, onChanged: _onPeriodChanged),
                   ),
 
-                  // Grafik tipi seçici
+                  // ── Grafik tipi ──
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: ChartTypeSelector(
-                      selected: _chartType,
-                      onChanged: _onChartTypeChanged,
-                    ),
+                    child: ChartTypeSelector(selected: _chartType, onChanged: _onChartTypeChanged),
                   ),
 
                   const SizedBox(height: 8),
 
-                  // Plotly Grafik
+                  // ── Plotly grafik ──
                   if (_plotlyConfig != null)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: PlotlyChart(
-                        plotlyConfig: _plotlyConfig!,
-                        height: 350,
-                        darkMode: isDark,
-                      ),
+                      child: PlotlyChart(plotlyConfig: _plotlyConfig!, height: 350, darkMode: isDark),
                     ),
 
-                  // Trend analizi sonuçları
+                  // ── 💡 Bana Açıkla toggle ──
+                  _buildExplainToggle(),
+
+                  // ── Otomatik yorum ──
+                  if (_showExplain && _explainText != null)
+                    _buildExplainCard(),
+
+                  // ── Trend ──
                   if (_trendResult != null) _buildTrendSection(theme),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 32),
                 ],
               ),
             ),
     );
   }
 
+  // ═══════════════════════════════════════════
+  //  🎓 EĞİTİM KARTI
+  // ═══════════════════════════════════════════
+
+  Widget _buildEducationCard() {
+    final d = _educationData!;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Card(
+        elevation: 0,
+        color: const Color(0xFF16213E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: const Color(0xFF4ECDC4).withOpacity(0.3)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Başlık + kapat
+              Row(children: [
+                const Icon(Icons.school, size: 20, color: Color(0xFF4ECDC4)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Bu Gösterge Nedir?',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF4ECDC4))),
+                ),
+                InkWell(
+                  onTap: () => setState(() => _showEducation = false),
+                  child: Icon(Icons.close, size: 18, color: Colors.grey[500]),
+                ),
+              ]),
+              const SizedBox(height: 14),
+
+              if (d['nedir'] != null)
+                _eduBlock('📖 Nedir?', d['nedir']),
+              if (d['neden_onemli'] != null) ...[
+                const SizedBox(height: 12),
+                _eduBlock('💡 Neden Önemli?', d['neden_onemli']),
+              ],
+              if (d['nasil_okunur'] != null) ...[
+                const SizedBox(height: 12),
+                _eduBlock('🔍 Nasıl Okunur?', d['nasil_okunur']),
+              ],
+
+              // İlişkili göstergeler chip'leri
+              if (d['iliskili'] != null) ...[
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 6, runSpacing: 6,
+                  children: [
+                    Text('İlişkili: ', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                    ...(d['iliskili'] as List).map((t) => Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF4ECDC4).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(t.toString(),
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF4ECDC4))),
+                    )),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _eduBlock(String title, String body) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        const SizedBox(height: 4),
+        Text(body, style: TextStyle(fontSize: 13, color: Colors.grey[300], height: 1.5)),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  //  💡 BANA AÇIKLA
+  // ═══════════════════════════════════════════
+
+  Widget _buildExplainToggle() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => setState(() => _showExplain = !_showExplain),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: _showExplain
+                ? const Color(0xFF4ECDC4).withOpacity(0.1)
+                : const Color(0xFF16213E),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: _showExplain
+                  ? const Color(0xFF4ECDC4).withOpacity(0.4)
+                  : const Color(0xFF2A2A4A),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _showExplain ? Icons.lightbulb : Icons.lightbulb_outline,
+                size: 18,
+                color: _showExplain ? const Color(0xFF4ECDC4) : Colors.grey[400],
+              ),
+              const SizedBox(width: 8),
+              Text('Bana Açıkla',
+                style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w500,
+                  color: _showExplain ? const Color(0xFF4ECDC4) : Colors.grey[400],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExplainCard() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Card(
+        elevation: 0,
+        color: const Color(0xFF16213E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: const Color(0xFFFFA726).withOpacity(0.3)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(children: [
+                Icon(Icons.lightbulb, size: 18, color: Color(0xFFFFA726)),
+                SizedBox(width: 8),
+                Text('Otomatik Yorum',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFFFFA726))),
+              ]),
+              const SizedBox(height: 12),
+              Text(_explainText!,
+                style: TextStyle(fontSize: 13, color: Colors.grey[300], height: 1.6)),
+              const SizedBox(height: 10),
+              Text('Bu yorum veri analizi ile otomatik üretilmiştir, yatırım tavsiyesi değildir.',
+                style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.grey[600])),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  //  DEĞİŞMEYEN KISIMLAR (Hafta 1'den)
+  // ═══════════════════════════════════════════
+
   Widget _buildValueHeader(ThemeData theme) {
     final ts = _timeSeries!;
-    final lastValue = ts.data.isNotEmpty ? ts.data.last.value : null;
-    final prevValue = ts.data.length > 1 ? ts.data[ts.data.length - 2].value : null;
-
-    double? change;
-    if (lastValue != null && prevValue != null && prevValue != 0) {
-      change = ((lastValue - prevValue) / prevValue) * 100;
+    final last = ts.data.isNotEmpty ? ts.data.last.value : null;
+    final prev = ts.data.length > 1 ? ts.data[ts.data.length - 2].value : null;
+    double? chg;
+    if (last != null && prev != null && prev != 0) {
+      chg = ((last - prev) / prev) * 100;
     }
 
     return Padding(
@@ -184,31 +377,30 @@ class _ChartScreenState extends State<ChartScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(
-            lastValue?.toStringAsFixed(ts.indicator.decimalPlaces) ?? '-',
-            style: theme.textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
+          Flexible(
+            child: Text(
+              last?.toStringAsFixed(ts.indicator.decimalPlaces) ?? '-',
+              style: theme.textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
           const SizedBox(width: 6),
-          Text(
-            ts.indicator.unit,
-            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey),
-          ),
+          Text(ts.indicator.unit,
+            style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey)),
           const SizedBox(width: 12),
-          if (change != null)
+          if (chg != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: change >= 0
-                    ? Colors.green.withOpacity(0.1)
-                    : Colors.red.withOpacity(0.1),
+                color: (chg >= 0 ? const Color(0xFF4ECDC4) : const Color(0xFFFF6B6B))
+                    .withOpacity(0.15),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
-                '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
+                '${chg >= 0 ? '+' : ''}${chg.toStringAsFixed(2)}%',
                 style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: change >= 0 ? Colors.green : Colors.red,
+                  fontSize: 13, fontWeight: FontWeight.w600,
+                  color: chg >= 0 ? const Color(0xFF4ECDC4) : const Color(0xFFFF6B6B),
                 ),
               ),
             ),
@@ -220,50 +412,40 @@ class _ChartScreenState extends State<ChartScreen> {
   Widget _buildTrendSection(ThemeData theme) {
     final trend = _trendResult!['trend'] ?? {};
     final recent = _trendResult!['recent_changes'] ?? {};
-    final direction = trend['direction_tr'] ?? '';
-    final rSquared = trend['r_squared'];
-    final volatility = _trendResult!['volatility_pct'];
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Card(
         elevation: 0,
+        color: const Color(0xFF1A1A2E),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: theme.dividerColor.withOpacity(0.2)),
+          side: const BorderSide(color: Color(0xFF2A2A4A)),
         ),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.trending_up, size: 18),
-                  SizedBox(width: 8),
-                  Text('Trend Analizi', style: TextStyle(fontWeight: FontWeight.w600)),
-                ],
-              ),
+              const Row(children: [
+                Icon(Icons.trending_up, size: 18, color: Color(0xFF4ECDC4)),
+                SizedBox(width: 8),
+                Text('Trend Analizi', style: TextStyle(fontWeight: FontWeight.w600)),
+              ]),
               const SizedBox(height: 12),
-              _infoRow('Trend yönü', direction),
-              if (rSquared != null) _infoRow('R²', rSquared.toStringAsFixed(3)),
-              if (volatility != null) _infoRow('Volatilite', '%${volatility.toStringAsFixed(1)}'),
-              _infoRow('Dönem yükseği', _trendResult!['period_high']?.toString() ?? '-'),
-              _infoRow('Dönem düşüğü', _trendResult!['period_low']?.toString() ?? '-'),
-
-              // Son 3 ay değişim
+              _row('Trend yönü', trend['direction_tr'] ?? ''),
+              if (trend['r_squared'] != null)
+                _row('R²', (trend['r_squared'] as num).toStringAsFixed(3)),
+              if (_trendResult!['volatility_pct'] != null)
+                _row('Volatilite', '%${(_trendResult!['volatility_pct'] as num).toStringAsFixed(1)}'),
+              _row('Dönem yükseği', _trendResult!['period_high']?.toString() ?? '-'),
+              _row('Dönem düşüğü', _trendResult!['period_low']?.toString() ?? '-'),
               if (recent['last_3_months'] != null) ...[
-                const Divider(height: 20),
-                _infoRow(
-                  'Son 3 ay değişim',
-                  '%${recent['last_3_months']['percent_change']}',
-                ),
+                const Divider(height: 20, color: Color(0xFF2A2A4A)),
+                _row('Son 3 ay', '%${recent['last_3_months']['percent_change']}'),
               ],
               if (recent['last_12_months'] != null)
-                _infoRow(
-                  'Son 12 ay değişim',
-                  '%${recent['last_12_months']['percent_change']}',
-                ),
+                _row('Son 12 ay', '%${recent['last_12_months']['percent_change']}'),
             ],
           ),
         ),
@@ -271,13 +453,13 @@ class _ChartScreenState extends State<ChartScreen> {
     );
   }
 
-  Widget _infoRow(String label, String value) {
+  Widget _row(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+          Text(label, style: TextStyle(fontSize: 13, color: Colors.grey[500])),
           Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
         ],
       ),
@@ -290,10 +472,11 @@ class _ChartScreenState extends State<ChartScreen> {
 
     showModalBottomSheet(
       context: context,
+      backgroundColor: const Color(0xFF1A1A2E),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => Padding(
+      builder: (_) => Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -303,12 +486,12 @@ class _ChartScreenState extends State<ChartScreen> {
             const SizedBox(height: 4),
             Text(ind.nameEn, style: TextStyle(color: Colors.grey[500])),
             const SizedBox(height: 16),
-            _infoRow('EVDS Kodu', ind.evdsCode),
-            _infoRow('Birim', ind.unit),
-            _infoRow('Frekans', ind.frequency),
-            _infoRow('Kaynak', ind.source),
-            _infoRow('Veri sayısı', '${_timeSeries!.data.length}'),
-            _infoRow('Dönem', '${_timeSeries!.periodStart} → ${_timeSeries!.periodEnd}'),
+            _row('EVDS Kodu', ind.evdsCode),
+            _row('Birim', ind.unit),
+            _row('Frekans', ind.frequency),
+            _row('Kaynak', ind.source),
+            _row('Veri sayısı', '${_timeSeries!.data.length}'),
+            _row('Dönem', '${_timeSeries!.periodStart} → ${_timeSeries!.periodEnd}'),
             const SizedBox(height: 16),
           ],
         ),

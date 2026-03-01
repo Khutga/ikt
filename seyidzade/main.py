@@ -6,8 +6,10 @@ PHP backend'den gelen zaman serisi verilerini analiz eder.
 
 Endpoints:
     POST /analyze          → Ana analiz endpoint'i (korelasyon, trend, istatistik)
-    POST /chart-config     → Plotly.js grafik konfigürasyonu üretir
     GET  /health           → Servis sağlık kontrolü
+
+Not: Grafik config üretimi artık Flutter tarafında (ChartConfigBuilder) yapılıyor.
+     Bu servis sadece istatistiksel analiz içindir.
 
 Çalıştırma:
     pip install fastapi uvicorn pandas numpy scipy
@@ -18,10 +20,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-import json
 
 from services.analyzer import AnalyzerService
-from services.chart_builder import ChartBuilder
 
 # =========================================
 # UYGULAMA AYARLARI
@@ -29,8 +29,8 @@ from services.chart_builder import ChartBuilder
 
 app = FastAPI(
     title="Macro Dashboard - Analiz Servisi",
-    description="Ekonomik veri analizi ve grafik konfigürasyonu üretici",
-    version="1.0.0",
+    description="Ekonomik veri analizi (korelasyon, trend, istatistik)",
+    version="1.1.0",
 )
 
 app.add_middleware(
@@ -40,13 +40,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Servisler
 analyzer = AnalyzerService()
-chart_builder = ChartBuilder()
 
 
 # =========================================
-# MODELLER (Request/Response)
+# MODELLER
 # =========================================
 
 class DataPoint(BaseModel):
@@ -70,15 +68,6 @@ class AnalyzeRequest(BaseModel):
     params: Optional[dict] = {}
 
 
-class ChartConfigRequest(BaseModel):
-    chart_type: str = "line"  # line, bar, scatter, heatmap, area
-    series_data: list[SeriesInput]
-    title: str = ""
-    overlay: bool = False  # İki seriyi üst üste bindirme
-    normalize: bool = False  # Farklı birimleri normalize etme (0-100 arası)
-    params: Optional[dict] = {}
-
-
 # =========================================
 # ENDPOINTS
 # =========================================
@@ -86,23 +75,22 @@ class ChartConfigRequest(BaseModel):
 @app.get("/health")
 def health_check():
     """Servis sağlık kontrolü"""
-    return {"status": "ok", "service": "macro-dashboard-analyzer", "version": "1.0.0"}
+    return {"status": "ok", "service": "macro-dashboard-analyzer", "version": "1.1.0"}
 
 
 @app.post("/analyze")
 def analyze(request: AnalyzeRequest):
     """
     Ana analiz endpoint'i
-    
+
     Desteklenen analiz tipleri:
     - correlation: İki gösterge arasındaki korelasyon (Pearson, Spearman)
     - trend: Trend analizi (lineer regresyon, eğim, yön)
-    - statistics: Temel istatistikler (ortalama, medyan, std, min, max, çeyrekler)
-    - comparison: İki gösterge karşılaştırması (yüzdesel değişim, fark)
+    - statistics: Temel istatistikler (ortalama, medyan, std, min, max)
+    - comparison: İki gösterge karşılaştırması
     - moving_avg: Hareketli ortalama hesaplama
     """
     try:
-        # Pydantic model'i dict'e çevir
         series_list = [s.model_dump() for s in request.series_data]
 
         result = match_analysis_type(
@@ -117,32 +105,6 @@ def analyze(request: AnalyzeRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analiz hatası: {str(e)}")
-
-
-@app.post("/chart-config")
-def generate_chart_config(request: ChartConfigRequest):
-    """
-    Plotly.js grafik konfigürasyonu üretir
-    
-    Flutter WebView'da doğrudan kullanılabilecek JSON config döner.
-    Desteklenen grafik tipleri: line, bar, scatter, heatmap, area
-    """
-    try:
-        series_list = [s.model_dump() for s in request.series_data]
-
-        config = chart_builder.build(
-            chart_type=request.chart_type,
-            series_data=series_list,
-            title=request.title,
-            overlay=request.overlay,
-            normalize=request.normalize,
-            params=request.params or {},
-        )
-
-        return {"success": True, "plotly_config": config}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Grafik config hatası: {str(e)}")
 
 
 # =========================================

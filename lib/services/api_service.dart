@@ -5,21 +5,20 @@ import '../models/models.dart';
 
 /// API Servisi - PHP Backend ile iletişim katmanı
 ///
-/// Tüm HTTP istekleri bu servis üzerinden yapılır.
-/// Hata yönetimi ve response parsing burada merkezileştirilir.
+/// Grafik config'i artık yerel olarak üretilir (ChartConfigBuilder).
+/// Python servisi sadece istatistiksel analiz için kullanılır (opsiyonel).
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
   ApiService._internal();
 
   final String _baseUrl = AppConfig.apiBaseUrl;
-  final Duration _timeout = const Duration(seconds: 15);
+  final Duration _timeout = const Duration(seconds: 30);
 
   // =========================================
   // KATEGORİLER
   // =========================================
 
-  /// Tüm aktif kategorileri getirir
   Future<List<Category>> getCategories() async {
     final data = await _get({'action': 'categories'});
     final list = data['data'] as List;
@@ -30,7 +29,6 @@ class ApiService {
   // GÖSTERGELER
   // =========================================
 
-  /// Gösterge listesi (opsiyonel kategori filtresi)
   Future<List<Indicator>> getIndicators(
       {int? categoryId, String? categoryCode}) async {
     final params = <String, String>{'action': 'indicators'};
@@ -42,13 +40,11 @@ class ApiService {
     return list.map((e) => Indicator.fromJson(e)).toList();
   }
 
-  /// Tek gösterge detayı
   Future<Indicator> getIndicatorDetail(int id) async {
     final data = await _get({'action': 'indicator', 'id': id.toString()});
     return Indicator.fromJson(data['data']);
   }
 
-  /// Gösterge arama
   Future<List<Indicator>> searchIndicators(String query) async {
     if (query.length < 2) return [];
     final data = await _get({'action': 'search', 'q': query});
@@ -60,7 +56,6 @@ class ApiService {
   // ZAMAN SERİSİ VERİSİ
   // =========================================
 
-  /// Tek gösterge zaman serisi verisi
   Future<TimeSeries> getTimeSeriesData(int indicatorId,
       {String period = '1y'}) async {
     final data = await _get({
@@ -71,7 +66,6 @@ class ApiService {
     return TimeSeries.fromJson(data);
   }
 
-  /// Tarih aralığı ile veri çekme
   Future<TimeSeries> getTimeSeriesDataByRange(
     int indicatorId,
     String startDate,
@@ -86,7 +80,6 @@ class ApiService {
     return TimeSeries.fromJson(data);
   }
 
-  /// Birden fazla göstergeyi karşılaştır
   Future<List<TimeSeries>> getComparisonData(
     List<int> indicatorIds, {
     String period = '5y',
@@ -112,31 +105,29 @@ class ApiService {
   // DASHBOARD
   // =========================================
 
-  /// Dashboard özet: tüm göstergelerin son değerleri (kategorize)
   Future<Map<String, DashboardCategory>> getLatestValues() async {
     final data = await _get({'action': 'latest'});
 
     if (data['data'] is List) {
       return {};
     }
-    
-    final grouped = data['data'] as Map<String, dynamic>;
 
+    final grouped = data['data'] as Map<String, dynamic>;
     return grouped
         .map((key, value) => MapEntry(key, DashboardCategory.fromJson(value)));
   }
 
-  /// Sistem istatistikleri
   Future<Map<String, dynamic>> getSystemStats() async {
     final data = await _get({'action': 'stats'});
     return data['data'];
   }
 
   // =========================================
-  // ANALİZ (Python proxy)
+  // ANALİZ (Python proxy — opsiyonel)
   // =========================================
 
   /// Analiz isteği gönderir (PHP → Python proxy)
+  /// Python servisi çalışmıyorsa hata fırlatır.
   Future<AnalysisResult> analyze({
     required String type,
     required List<int> indicatorIds,
@@ -152,39 +143,6 @@ class ApiService {
 
     final data = await _post({'action': 'analyze'}, body);
     return AnalysisResult.fromJson(data['data'] ?? data);
-  }
-
-  /// Grafik konfigürasyonu al (Python'dan Plotly.js config)
-  Future<Map<String, dynamic>> getChartConfig({
-    required String chartType,
-    required List<Map<String, dynamic>> seriesData,
-    String title = '',
-    bool overlay = false,
-    bool normalize = false,
-    Map<String, dynamic> params = const {},
-  }) async {
-    final url = Uri.parse('${AppConfig.pythonServiceUrl}/chart-config');
-
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'chart_type': chartType,
-            'series_data': seriesData,
-            'title': title,
-            'overlay': overlay,
-            'normalize': normalize,
-            'params': params,
-          }),
-        )
-        .timeout(_timeout);
-
-    final data = jsonDecode(response.body);
-    if (data['success'] != true) {
-      throw ApiException(data['detail'] ?? 'Grafik config alınamadı');
-    }
-    return data['plotly_config'];
   }
 
   // =========================================
@@ -215,7 +173,7 @@ class ApiService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(body),
           )
-          .timeout(_timeout);
+          .timeout(const Duration(seconds: 45)); // Analiz için daha uzun timeout
 
       return _handleResponse(response);
     } catch (e) {
@@ -239,7 +197,6 @@ class ApiService {
   }
 }
 
-/// API hata sınıfı
 class ApiException implements Exception {
   final String message;
   ApiException(this.message);

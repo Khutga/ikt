@@ -1,15 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:macro_dashboard/config/chart_config_builder.dart';
 import '../services/api_service.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../widgets/plotly_chart.dart';
 
 /// Karşılaştırma Ekranı
-///
-/// Kullanıcı iki gösterge seçer, sistem:
-/// 1. Her iki seriyi overlay grafik olarak gösterir
-/// 2. Korelasyon analizi yapar
-/// 3. Scatter plot ile ilişkiyi görselleştirir
 class ComparisonScreen extends StatefulWidget {
   final int? initialIndicatorId;
 
@@ -21,25 +17,24 @@ class ComparisonScreen extends StatefulWidget {
 
 class _ComparisonScreenState extends State<ComparisonScreen> {
   final _api = ApiService();
+  final _chartBuilder = ChartConfigBuilder();
 
-  // Seçilen göstergeler
   Indicator? _indicatorA;
   Indicator? _indicatorB;
 
-  // Tüm gösterge listesi (seçim için)
-  List<Indicator> _allIndicators = [];
+  List<Indicator> _allIndicators = [];     // Ham liste
+  List<Indicator> _validIndicators = [];   // Sadece verisi olanlar
   bool _loadingIndicators = true;
 
-  // Analiz sonuçları
   String _period = '5y';
   bool _normalize = true;
   bool _isAnalyzing = false;
   String? _error;
+  String? _warning;
   Map<String, dynamic>? _overlayConfig;
   Map<String, dynamic>? _scatterConfig;
   Map<String, dynamic>? _correlationResult;
 
-  // Gecikme (lag) parametresi
   int _lagDays = 0;
 
   @override
@@ -51,15 +46,18 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
   Future<void> _loadIndicators() async {
     try {
       final indicators = await _api.getIndicators();
+      // Sadece son değeri olan (verisi olan) göstergeleri filtrele
+      final valid = indicators.where((i) => i.lastValue != null).toList();
+
       setState(() {
         _allIndicators = indicators;
+        _validIndicators = valid;
         _loadingIndicators = false;
 
-        // Eğer başlangıç göstergesi varsa seç
         if (widget.initialIndicatorId != null) {
-          _indicatorA = indicators.firstWhere(
+          _indicatorA = valid.firstWhere(
             (i) => i.id == widget.initialIndicatorId,
-            orElse: () => indicators.first,
+            orElse: () => valid.first,
           );
         }
       });
@@ -71,64 +69,119 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
     }
   }
 
+  /// Periyotları genişten dara dener, veri bulana kadar
+  Future<List<TimeSeries>> _fetchWithFallback(List<int> ids) async {
+    final periodsToTry = <String>[_period];
+    const allPeriods = ['1m', '3m', '6m', '1y', '3y', '5y', '10y', 'max'];
+    final selectedIdx = allPeriods.indexOf(_period);
+
+    for (int i = selectedIdx + 1; i < allPeriods.length; i++) {
+      if (!periodsToTry.contains(allPeriods[i])) {
+        periodsToTry.add(allPeriods[i]);
+      }
+    }
+
+    for (final period in periodsToTry) {
+      try {
+        final series = await _api.getComparisonData(ids, period: period);
+        if (series.any((s) => s.data.isNotEmpty)) {
+          if (period != _period) {
+            _warning =
+                '${_periodLabel(_period)} periyodunda yeterli veri bulunamadı, '
+                '${_periodLabel(period)} periyodu kullanıldı.';
+          }
+          return series;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+    return [];
+  }
+
+  String _periodLabel(String value) {
+    const labels = {
+      '1m': '1 Ay', '3m': '3 Ay', '6m': '6 Ay', '1y': '1 Yıl',
+      '3y': '3 Yıl', '5y': '5 Yıl', '10y': '10 Yıl', 'max': 'Tümü',
+    };
+    return labels[value] ?? value;
+  }
+
   Future<void> _runAnalysis() async {
     if (_indicatorA == null || _indicatorB == null) return;
 
     setState(() {
       _isAnalyzing = true;
       _error = null;
+      _warning = null;
+      _overlayConfig = null;
+      _scatterConfig = null;
+      _correlationResult = null;
     });
 
     try {
-      // 1. Karşılaştırma verisi çek
-      final series = await _api.getComparisonData(
+      final series = await _fetchWithFallback(
         [_indicatorA!.id, _indicatorB!.id],
-        period: _period,
       );
-      if (series.any((s) => s.data.isEmpty)) {
+
+      if (series.isEmpty || series.every((s) => s.data.isEmpty)) {
         setState(() {
-          _error =
-              'Seçilen göstergelerden birinde veya ikisinde de bu periyoda ait veri bulunmuyor. Lütfen farklı göstergeler seçin.';
+          _error = 'Her iki gösterge için de hiçbir periyotta veri bulunamadı.';
           _isAnalyzing = false;
         });
         return;
       }
-      final seriesDataForChart =
-          series.map((s) => s.toAnalysisFormat()).toList();
 
-      // 2. Overlay çizgi grafik config'i
-      final overlayConfig = await _api.getChartConfig(
+      final nonEmptySeries = series.where((s) => s.data.isNotEmpty).toList();
+      final seriesDataForChart =
+          nonEmptySeries.map((s) => s.toAnalysisFormat()).toList();
+
+      if (series.length == 2 && nonEmptySeries.length == 1) {
+        final emptySeries = series.firstWhere((s) => s.data.isEmpty);
+        _warning = (_warning != null ? '${_warning!}\n' : '') +
+            '${emptySeries.indicator.nameTr} için veri bulunamadı, '
+                'sadece ${nonEmptySeries.first.indicator.nameTr} gösteriliyor.';
+      }
+
+      final overlayConfig = _chartBuilder.build(
         chartType: 'line',
         seriesData: seriesDataForChart,
         title: '${_indicatorA!.nameTr} vs ${_indicatorB!.nameTr}',
-        overlay: !_normalize,
-        normalize: _normalize,
+        overlay: !_normalize && nonEmptySeries.length > 1,
+        normalize: _normalize && nonEmptySeries.length > 1,
       );
 
-      // 3. Scatter plot config'i
-      final scatterConfig = await _api.getChartConfig(
-        chartType: 'scatter',
-        seriesData: seriesDataForChart,
-        title: 'Korelasyon Saçılım Grafiği',
-      );
+      Map<String, dynamic>? scatterConfig;
+      if (nonEmptySeries.length >= 2) {
+        scatterConfig = _chartBuilder.build(
+          chartType: 'scatter',
+          seriesData: seriesDataForChart,
+          title: 'Korelasyon Saçılım Grafiği',
+        );
+      }
 
-      // 4. Korelasyon analizi
-      final analysisResult = await _api.analyze(
-        type: 'correlation',
-        indicatorIds: [_indicatorA!.id, _indicatorB!.id],
-        period: _period,
-        params: {'lag': _lagDays},
-      );
+      Map<String, dynamic>? correlationResult;
+      if (nonEmptySeries.length >= 2) {
+        try {
+          final analysisResult = await _api.analyze(
+            type: 'correlation',
+            indicatorIds: [_indicatorA!.id, _indicatorB!.id],
+            period: _period,
+            params: {'lag': _lagDays},
+          );
+          correlationResult = analysisResult.result;
+        } catch (_) {}
+      }
 
       setState(() {
         _overlayConfig = overlayConfig;
         _scatterConfig = scatterConfig;
-        _correlationResult = analysisResult.result;
+        _correlationResult = correlationResult;
         _isAnalyzing = false;
       });
     } catch (e) {
       setState(() {
-        _error = 'Analiz hatası: $e';
+        _error = 'Veri çekme hatası: $e';
         _isAnalyzing = false;
       });
     }
@@ -150,7 +203,17 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Gösterge seçiciler
+                  // Verisi olmayan gösterge sayısını göster
+                  if (_allIndicators.length != _validIndicators.length)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        '${_validIndicators.length} gösterge listeleniyor '
+                        '(${_allIndicators.length - _validIndicators.length} tanesi henüz verisi olmadığı için gizlendi)',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                    ),
+
                   _buildSelector('Gösterge A', _indicatorA, (val) {
                     setState(() => _indicatorA = val);
                   }),
@@ -161,7 +224,6 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Periyot seçici
                   PeriodSelector(
                     selected: _period,
                     onChanged: (val) => setState(() => _period = val),
@@ -169,10 +231,8 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
 
                   const SizedBox(height: 12),
 
-                  // Seçenekler
                   Row(
                     children: [
-                      // Normalize toggle
                       Expanded(
                         child: SwitchListTile(
                           dense: true,
@@ -180,10 +240,10 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
                           title: const Text('Normalize (0-100)',
                               style: TextStyle(fontSize: 13)),
                           value: _normalize,
-                          onChanged: (val) => setState(() => _normalize = val),
+                          onChanged: (val) =>
+                              setState(() => _normalize = val),
                         ),
                       ),
-                      // Lag input
                       SizedBox(
                         width: 100,
                         child: TextField(
@@ -193,7 +253,8 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
                             border: OutlineInputBorder(),
                           ),
                           keyboardType: TextInputType.number,
-                          onChanged: (val) => _lagDays = int.tryParse(val) ?? 0,
+                          onChanged: (val) =>
+                              _lagDays = int.tryParse(val) ?? 0,
                           style: const TextStyle(fontSize: 13),
                         ),
                       ),
@@ -202,7 +263,6 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Analiz butonu
                   FilledButton.icon(
                     onPressed: _indicatorA != null &&
                             _indicatorB != null &&
@@ -217,19 +277,45 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
                                 strokeWidth: 2, color: Colors.white),
                           )
                         : const Icon(Icons.analytics),
-                    label:
-                        Text(_isAnalyzing ? 'Analiz ediliyor...' : 'Analiz Et'),
+                    label: Text(
+                        _isAnalyzing ? 'Analiz ediliyor...' : 'Analiz Et'),
                   ),
 
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
                       child: Text(_error!,
-                          style:
-                              const TextStyle(color: Colors.red, fontSize: 13)),
+                          style: const TextStyle(
+                              color: Colors.red, fontSize: 13)),
                     ),
 
-                  // Sonuçlar
+                  if (_warning != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.info_outline,
+                                size: 16, color: Colors.orange),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _warning!,
+                                style: const TextStyle(
+                                    fontSize: 12, color: Colors.orange),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
                   if (_overlayConfig != null) ...[
                     const SizedBox(height: 24),
                     Text('Zaman Serisi Karşılaştırma',
@@ -249,7 +335,8 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
 
                   if (_scatterConfig != null) ...[
                     const SizedBox(height: 16),
-                    Text('Saçılım Grafiği', style: theme.textTheme.titleSmall),
+                    Text('Saçılım Grafiği',
+                        style: theme.textTheme.titleSmall),
                     const SizedBox(height: 8),
                     PlotlyChart(
                       plotlyConfig: _scatterConfig!,
@@ -267,6 +354,13 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
 
   Widget _buildSelector(
       String label, Indicator? selected, ValueChanged<Indicator> onChanged) {
+    // Kategoriye göre grupla
+    final grouped = <String, List<Indicator>>{};
+    for (final ind in _validIndicators) {
+      final cat = ind.categoryNameTr ?? 'Diğer';
+      grouped.putIfAbsent(cat, () => []).add(ind);
+    }
+
     return DropdownButtonFormField<int>(
       value: selected?.id,
       decoration: InputDecoration(
@@ -275,7 +369,7 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
         isDense: true,
       ),
       isExpanded: true,
-      items: _allIndicators.map((ind) {
+      items: _validIndicators.map((ind) {
         return DropdownMenuItem(
           value: ind.id,
           child: Text(
@@ -287,7 +381,7 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
       }).toList(),
       onChanged: (id) {
         if (id != null) {
-          final ind = _allIndicators.firstWhere((i) => i.id == id);
+          final ind = _validIndicators.firstWhere((i) => i.id == id);
           onChanged(ind);
         }
       },

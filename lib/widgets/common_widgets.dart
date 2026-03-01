@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import '../models/models.dart';
+import 'dart:math';
 
-/// Periyot seçici - 1A, 3A, 1Y, 5Y, 10Y, Tümü
+/// Periyot seçici
 class PeriodSelector extends StatelessWidget {
   final String selected;
   final ValueChanged<String> onChanged;
@@ -28,11 +29,17 @@ class PeriodSelector extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected ? Colors.white : null,
+                  color: isSelected ? Colors.black : null,
                 ),
               ),
               selected: isSelected,
-              selectedColor: Theme.of(context).colorScheme.primary,
+              selectedColor: const Color(0xFF4ECDC4),
+              backgroundColor: const Color(0xFF1A1A2E),
+              side: BorderSide(
+                color: isSelected
+                    ? const Color(0xFF4ECDC4)
+                    : const Color(0xFF2A2A4A),
+              ),
               onSelected: (_) => onChanged(p['value']!),
               visualDensity: VisualDensity.compact,
               padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -82,59 +89,133 @@ class ChartTypeSelector extends StatelessWidget {
   }
 }
 
-/// Gösterge kartı - Dashboard'da kullanılır
+/// Gösterge kartı — sparkline dahil
 class IndicatorCard extends StatelessWidget {
   final DashboardIndicator indicator;
+  final bool isFavorite;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   const IndicatorCard({
     super.key,
     required this.indicator,
+    this.isFavorite = false,
     this.onTap,
+    this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // Değişim yönüne göre renk
+    final isUp = (indicator.changePercent ?? 0) >= 0;
+    final changeColor = isUp
+        ? const Color(0xFF4ECDC4)  // Turkuaz
+        : const Color(0xFFFF6B6B); // Kırmızı
+    final sparkColor = indicator.sparkline.isNotEmpty
+        ? changeColor
+        : const Color(0xFF4ECDC4);
 
     return Card(
       elevation: 0,
+      color: const Color(0xFF1A1A2E),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.dividerColor.withOpacity(0.2)),
+        side: BorderSide(
+          color: isFavorite
+              ? const Color(0xFFFFD700).withOpacity(0.3)
+              : const Color(0xFF2A2A4A),
+        ),
       ),
+      clipBehavior: Clip.hardEdge,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                indicator.name,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: Colors.grey[600],
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+              // Üst satır: isim + favori ikonu
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      indicator.name,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey[400],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (isFavorite)
+                    const Icon(Icons.star, size: 14, color: Color(0xFFFFD700)),
+                ],
               ),
+
+              const SizedBox(height: 4),
+
+              // Değer + değişim
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Flexible(
+                    child: Text(
+                      indicator.value != null
+                          ? _formatNumber(indicator.value!)
+                          : '-',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    indicator.unit,
+                    style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                  ),
+                ],
+              ),
+
+              // Değişim yüzdesi
+              if (indicator.changePercent != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    '${isUp ? '+' : ''}${indicator.changePercent!.toStringAsFixed(2)}%',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: changeColor,
+                    ),
+                  ),
+                ),
+
               const Spacer(),
-              Text(
-                indicator.value != null
-                    ? '${_formatNumber(indicator.value!)} ${indicator.unit}'
-                    : 'Veri yok',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (indicator.date != null)
+
+              // Sparkline mini grafik
+              if (indicator.sparkline.isNotEmpty)
+                SizedBox(
+                  height: 28,
+                  width: double.infinity,
+                  child: CustomPaint(
+                    painter: _SparklinePainter(
+                      values: indicator.sparkline,
+                      color: sparkColor,
+                    ),
+                  ),
+                )
+              else if (indicator.date != null)
                 Text(
                   indicator.date!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.grey[400],
-                    fontSize: 10,
-                  ),
+                  style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                  maxLines: 1,
                 ),
             ],
           ),
@@ -153,7 +234,72 @@ class IndicatorCard extends StatelessWidget {
   }
 }
 
-/// Kategori başlık widget'ı
+/// Sparkline mini grafik painter
+class _SparklinePainter extends CustomPainter {
+  final List<double> values;
+  final Color color;
+
+  _SparklinePainter({required this.values, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+
+    final minVal = values.reduce(min);
+    final maxVal = values.reduce(max);
+    final range = maxVal - minVal;
+    if (range == 0) return;
+
+    final dx = size.width / (values.length - 1);
+
+    // Çizgi
+    final linePaint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path();
+    for (int i = 0; i < values.length; i++) {
+      final x = i * dx;
+      final y = size.height - ((values[i] - minVal) / range * size.height);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, linePaint);
+
+    // Gradient dolgu
+    final fillPath = Path.from(path)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [color.withOpacity(0.2), color.withOpacity(0.0)],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+
+    canvas.drawPath(fillPath, fillPaint);
+
+    // Son nokta (dot)
+    final dotPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    final lastX = (values.length - 1) * dx;
+    final lastY = size.height - ((values.last - minVal) / range * size.height);
+    canvas.drawCircle(Offset(lastX, lastY), 2, dotPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+/// Kategori başlık
 class CategoryHeader extends StatelessWidget {
   final String title;
   final String? color;
@@ -170,7 +316,7 @@ class CategoryHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color accentColor = Colors.blue;
+    Color accentColor = const Color(0xFF4ECDC4);
     if (color != null && color!.startsWith('#')) {
       try {
         accentColor = Color(int.parse(color!.replaceFirst('#', '0xFF')));
@@ -209,7 +355,7 @@ class CategoryHeader extends StatelessWidget {
   }
 }
 
-/// Yükleniyor / Hata / Boş durum widget'ları
+/// Yükleniyor / Hata / Boş durum
 class StateWidget extends StatelessWidget {
   final bool isLoading;
   final String? error;
@@ -228,7 +374,10 @@ class StateWidget extends StatelessWidget {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(32),
-          child: CircularProgressIndicator(strokeWidth: 2),
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Color(0xFF4ECDC4),
+          ),
         ),
       );
     }
@@ -240,12 +389,13 @@ class StateWidget extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
+              const Icon(Icons.error_outline, size: 48,
+                  color: Color(0xFFFF6B6B)),
               const SizedBox(height: 12),
               Text(
                 error!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[600]),
+                style: TextStyle(color: Colors.grey[400]),
               ),
               if (onRetry != null) ...[
                 const SizedBox(height: 16),
@@ -280,18 +430,21 @@ class CorrelationResultCard extends StatelessWidget {
 
     Color coeffColor;
     if (coefficient.abs() >= 0.6) {
-      coeffColor = coefficient > 0 ? Colors.green : Colors.red;
+      coeffColor = coefficient > 0
+          ? const Color(0xFF4ECDC4)
+          : const Color(0xFFFF6B6B);
     } else if (coefficient.abs() >= 0.3) {
-      coeffColor = Colors.orange;
+      coeffColor = const Color(0xFFFFA726);
     } else {
       coeffColor = Colors.grey;
     }
 
     return Card(
       elevation: 0,
+      color: const Color(0xFF1A1A2E),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.2)),
+        side: const BorderSide(color: Color(0xFF2A2A4A)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -300,7 +453,8 @@ class CorrelationResultCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.analytics, size: 20),
+                const Icon(Icons.analytics, size: 20,
+                    color: Color(0xFF4ECDC4)),
                 const SizedBox(width: 8),
                 const Text(
                   'Korelasyon Analizi',
@@ -309,20 +463,21 @@ class CorrelationResultCard extends StatelessWidget {
                 const Spacer(),
                 if (isSignificant)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.1),
+                      color: const Color(0xFF4ECDC4).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Text(
                       'Anlamlı',
-                      style: TextStyle(fontSize: 11, color: Colors.green),
+                      style: TextStyle(
+                          fontSize: 11, color: Color(0xFF4ECDC4)),
                     ),
                   ),
               ],
             ),
             const SizedBox(height: 16),
-            // Katsayı gösterimi
             Center(
               child: Column(
                 children: [
@@ -342,12 +497,11 @@ class CorrelationResultCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            // Yorum
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.05),
+                color: const Color(0xFF16213E),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -356,13 +510,10 @@ class CorrelationResultCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            // Detay satırları
             _detailRow('Veri noktası', '${result['data_points'] ?? '-'}'),
             _detailRow('p-değeri', '${pearson['p_value'] ?? '-'}'),
-            _detailRow(
-              'Spearman',
-              '${(result['spearman']?['coefficient'] ?? '-')}',
-            ),
+            _detailRow('Spearman',
+                '${(result['spearman']?['coefficient'] ?? '-')}'),
             if ((result['lag_days'] ?? 0) > 0)
               _detailRow('Gecikme', '${result['lag_days']} gün'),
           ],
@@ -377,8 +528,11 @@ class CorrelationResultCard extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          Text(label,
+              style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+          Text(value,
+              style:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
         ],
       ),
     );
