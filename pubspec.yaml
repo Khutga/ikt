@@ -1,0 +1,35 @@
+name: macro_dashboard
+description: Makroekonomik Veri Analizörü - TCMB EVDS verileriyle interaktif ekonomik dashboard
+
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP & API
+  http: ^1.2.0
+
+  # WebView (Plotly.js grafikleri için)
+  webview_flutter: ^4.7.0
+
+  # Durum yönetimi (ilerisi için)
+  provider: ^6.1.0
+
+  # Yerel depolama (cache, favoriler)
+  shared_preferences: ^2.2.0
+
+  # Tarih formatlama
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

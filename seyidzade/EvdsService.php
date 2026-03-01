@@ -189,12 +189,13 @@ class EvdsService
         string $endDate,
         string $type = 'json'
     ): ?array {
-        $url = $this->baseUrl . http_build_query([
-            'series'    => $seriesCodes,
-            'startDate' => $startDate,
-            'endDate'   => $endDate,
-            'type'      => $type,
-        ]);
+        // EVDS3 URL formatı: base_url + series=X&startDate=Y&endDate=Z&type=json
+        // Not: EVDS3 standart query string (?) kullanmaz, parametreler / sonrası direkt eklenir
+        $url = $this->baseUrl
+            . 'series=' . $seriesCodes
+            . '&startDate=' . $startDate
+            . '&endDate=' . $endDate
+            . '&type=' . $type;
 
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -206,7 +207,9 @@ class EvdsService
                 'key: ' . $this->apiKey,
                 'Accept: application/json',
             ],
-            CURLOPT_SSL_VERIFYPEER => true,
+            // Shared hosting'lerde EVDS SSL sertifikası sorun çıkarabilir
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
         ]);
 
         $response = curl_exec($ch);

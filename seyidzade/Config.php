@@ -11,16 +11,16 @@ return [
     'db' => [
         'host'     => getenv('DB_HOST') ?: 'localhost',
         'port'     => getenv('DB_PORT') ?: 3306,
-        'name'     => getenv('DB_NAME') ?: 'macro_dashboard',
-        'user'     => getenv('DB_USER') ?: 'root',
-        'password' => getenv('DB_PASS') ?: '',
+        'name'     => getenv('DB_NAME') ?: 'seyidzade_macro_dashboard',
+        'user'     => getenv('DB_USER') ?: 'seyidzade_macro',
+        'password' => getenv('DB_PASS') ?: 'Baghdad1258',
         'charset'  => 'utf8mb4',
     ],
 
     // TCMB EVDS API Ayarları
     'evds' => [
-        'base_url' => 'https://evds2.tcmb.gov.tr/service/evds/',
-        'api_key'  => getenv('EVDS_API_KEY') ?: 'BURAYA_API_KEYINIZI_GIRIN',
+        'base_url' => 'https://evds3.tcmb.gov.tr/igmevdsms-dis/',
+        'api_key'  => getenv('EVDS_API_KEY') ?: 'oigBbdDq8P',
         // Rate limit: Günde en fazla kaç istek atılsın
         'daily_request_limit' => 500,
         // İstek arası bekleme süresi (saniye)

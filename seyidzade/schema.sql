@@ -1,22 +1,3 @@
--- ============================================
--- MAKROEKONOMIK DASHBOARD - VERİTABANI ŞEMASI
--- ============================================
--- Proje: Macroeconomic Data Analyzer
--- Veritabanı: MySQL 8.0+
--- Karakter Seti: utf8mb4
--- ============================================
-
-CREATE DATABASE IF NOT EXISTS macro_dashboard
-    CHARACTER SET utf8mb4
-    COLLATE utf8mb4_unicode_ci;
-
-USE macro_dashboard;
-
--- ============================================
--- 1. KATEGORİLER TABLOSU
--- ============================================
--- EVDS'deki ana konu başlıklarını tutar
--- Örnek: Fiyat & Enflasyon, Para Politikası, Döviz & Altın...
 
 CREATE TABLE categories (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
