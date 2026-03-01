@@ -189,27 +189,24 @@ class EvdsService
         string $endDate,
         string $type = 'json'
     ): ?array {
-        // EVDS3 URL formatı: base_url + series=X&startDate=Y&endDate=Z&type=json
-        // Not: EVDS3 standart query string (?) kullanmaz, parametreler / sonrası direkt eklenir
-        $url = $this->baseUrl
-            . 'series=' . $seriesCodes
-            . '&startDate=' . $startDate
-            . '&endDate=' . $endDate
-            . '&type=' . $type;
+        $url = $this->baseUrl . http_build_query([
+            'series' => $seriesCodes,
+            'startDate' => $startDate,
+            'endDate' => $endDate,
+            'type' => $type,
+        ]);
 
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL            => $url,
+            CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_TIMEOUT => 30,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_HTTPHEADER     => [
+            CURLOPT_HTTPHEADER => [
                 'key: ' . $this->apiKey,
                 'Accept: application/json',
             ],
-            // Shared hosting'lerde EVDS SSL sertifikası sorun çıkarabilir
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_SSL_VERIFYPEER => true,
         ]);
 
         $response = curl_exec($ch);
@@ -267,10 +264,10 @@ class EvdsService
     {
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL            => $url,
+            CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 15,
-            CURLOPT_HTTPHEADER     => ['key: ' . $this->apiKey],
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => ['key: ' . $this->apiKey],
         ]);
 
         $response = curl_exec($ch);
@@ -306,9 +303,6 @@ class EvdsService
             return ['fetched' => 0, 'inserted' => 0];
         }
 
-        // EVDS seri kodundaki "." → "_" dönüşümü (JSON key formatı)
-        $jsonKey = str_replace('.', '_', $evdsCode);
-
         $stmt = $this->db->prepare(
             "INSERT INTO data_points (indicator_id, date, value) 
              VALUES (:indicator_id, :date, :value)
@@ -320,25 +314,33 @@ class EvdsService
         try {
             foreach ($items as $item) {
                 $dateStr = $item['Tarih'] ?? null;
-                $valueStr = $item[$jsonKey] ?? null;
+
+                // JSON key'i tahmin etmek yerine Tarih ve UNIXTIME harici ilk geçerli değeri al
+                $valueStr = null;
+                foreach ($item as $key => $val) {
+                    if ($key !== 'Tarih' && $key !== 'UNIXTIME' && $val !== null && $val !== '') {
+                        $valueStr = $val;
+                        break;
+                    }
+                }
 
                 // Boş veya null değerleri atla
-                if ($dateStr === null || $valueStr === null || $valueStr === '') {
+                if ($dateStr === null || $valueStr === null) {
                     continue;
                 }
 
-                // EVDS tarih formatı: dd-mm-yyyy → MySQL: yyyy-mm-dd
                 $date = $this->evdsDateToMysql($dateStr);
-                if ($date === null) continue;
+                if ($date === null)
+                    continue;
 
-                // Değeri float'a çevir (Türkçe ondalık ayırıcı virgül olabilir)
                 $value = str_replace(',', '.', $valueStr);
-                if (!is_numeric($value)) continue;
+                if (!is_numeric($value))
+                    continue;
 
                 $stmt->execute([
                     ':indicator_id' => $indicatorId,
-                    ':date'         => $date,
-                    ':value'        => (float) $value,
+                    ':date' => $date,
+                    ':value' => (float) $value,
                 ]);
 
                 if ($stmt->rowCount() > 0) {
@@ -354,27 +356,27 @@ class EvdsService
 
         return ['fetched' => $fetched, 'inserted' => $inserted];
     }
-
-    /**
-     * EVDS tarih formatını MySQL'e çevirir
-     * dd-mm-yyyy → yyyy-mm-dd
-     */
     private function evdsDateToMysql(string $evdsDate): ?string
     {
         $parts = explode('-', $evdsDate);
-        if (count($parts) !== 3) return null;
 
-        return sprintf('%s-%s-%s', $parts[2], $parts[1], $parts[0]);
+        // Günlük format: dd-mm-yyyy (3 parça)
+        if (count($parts) === 3) {
+            return sprintf('%s-%s-%s', $parts[2], $parts[1], $parts[0]);
+        }
+        // Aylık/Çeyreklik format: YYYY-MM veya YYYY-Q1 (2 parça)
+        elseif (count($parts) === 2) {
+            $year = strlen($parts[0]) === 4 ? $parts[0] : $parts[1];
+            $month = strlen($parts[0]) === 4 ? $parts[1] : $parts[0];
+
+            // Eğer Çeyreklik (Q1, Q2) ise ilk ayına çevir
+            $month = str_replace(['Q1', 'Q2', 'Q3', 'Q4'], ['01', '04', '07', '10'], $month);
+
+            return sprintf('%s-%02d-01', $year, (int) $month);
+        }
+
+        return null;
     }
-
-    // =========================================
-    // YARDIMCI FONKSİYONLAR
-    // =========================================
-
-    /**
-     * Akıllı başlangıç tarihi: Son veriden devam eder
-     * İlk çekimde ise default_history_years kadar geriye gider
-     */
     private function getSmartStartDate(array $indicator): string
     {
         // Son veri tarihini kontrol et
@@ -414,19 +416,20 @@ class EvdsService
         $stmt->execute([$indicator['id']]);
         $row = $stmt->fetch();
 
-        if (!$row || !$row['last_fetched_at']) return true;
+        if (!$row || !$row['last_fetched_at'])
+            return true;
 
         $lastFetched = new DateTime($row['last_fetched_at']);
         $now = new DateTime();
         $diff = $now->diff($lastFetched);
 
         return match ($indicator['frequency']) {
-            'daily'     => $diff->days >= 1 || $diff->h >= 6,
-            'weekly'    => $diff->days >= 1,
-            'monthly'   => $diff->days >= 1,
+            'daily' => $diff->days >= 1 || $diff->h >= 6,
+            'weekly' => $diff->days >= 1,
+            'monthly' => $diff->days >= 1,
             'quarterly' => $diff->days >= 7,
-            'yearly'    => $diff->days >= 30,
-            default     => true,
+            'yearly' => $diff->days >= 30,
+            default => true,
         };
     }
 
@@ -489,11 +492,11 @@ class EvdsService
         ]);
 
         return [
-            'success'  => $status === 'success',
-            'fetched'  => $fetched,
+            'success' => $status === 'success',
+            'fetched' => $fetched,
             'inserted' => $inserted,
-            'message'  => $message,
-            'time_ms'  => $executionMs,
+            'message' => $message,
+            'time_ms' => $executionMs,
         ];
     }
 }

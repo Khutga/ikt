@@ -40,20 +40,31 @@ try {
     $db = Database::getConnection();
 
     $response = match ($action) {
-        'categories'  => getCategories($db),
-        'indicators'  => getIndicators($db),
-        'indicator'   => getIndicatorDetail($db),
-        'data'        => getTimeSeriesData($db),
-        'compare'     => getComparisonData($db),
-        'latest'      => getLatestValues($db),
-        'search'      => searchIndicators($db),
-        'analyze'     => proxyToAnalysis(),
-        'fetch'       => triggerFetch(),
-        'stats'       => getSystemStats($db),
-        default       => ['error' => 'Geçersiz action', 'available_actions' => [
-            'categories', 'indicators', 'indicator', 'data', 'compare',
-            'latest', 'search', 'analyze', 'fetch', 'stats'
-        ]],
+        'categories' => getCategories($db),
+        'indicators' => getIndicators($db),
+        'indicator' => getIndicatorDetail($db),
+        'data' => getTimeSeriesData($db),
+        'compare' => getComparisonData($db),
+        'latest' => getLatestValues($db),
+        'search' => searchIndicators($db),
+        'analyze' => proxyToAnalysis(),
+        'fetch' => triggerFetch(),
+        'stats' => getSystemStats($db),
+        default => [
+            'error' => 'Geçersiz action',
+            'available_actions' => [
+                'categories',
+                'indicators',
+                'indicator',
+                'data',
+                'compare',
+                'latest',
+                'search',
+                'analyze',
+                'fetch',
+                'stats'
+            ]
+        ],
     };
 
     echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
@@ -130,7 +141,8 @@ function getIndicators(PDO $db): array
 function getIndicatorDetail(PDO $db): array
 {
     $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
-    if (!$id) return ['error' => 'id parametresi gerekli'];
+    if (!$id)
+        return ['error' => 'id parametresi gerekli'];
 
     $stmt = $db->prepare("
         SELECT i.*, c.name_tr as category_name_tr, c.code as category_code
@@ -141,7 +153,8 @@ function getIndicatorDetail(PDO $db): array
     $stmt->execute([$id]);
     $indicator = $stmt->fetch();
 
-    if (!$indicator) return ['error' => 'Gösterge bulunamadı'];
+    if (!$indicator)
+        return ['error' => 'Gösterge bulunamadı'];
 
     // Son 5 değer
     $stmt = $db->prepare("
@@ -168,19 +181,20 @@ function getIndicatorDetail(PDO $db): array
 function getTimeSeriesData(PDO $db): array
 {
     $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
-    if (!$id) return ['error' => 'id parametresi gerekli'];
+    if (!$id)
+        return ['error' => 'id parametresi gerekli'];
 
     // Period kısayolları
     $period = $_GET['period'] ?? null;
     if ($period) {
         $endDate = date('Y-m-d');
         $startDate = match ($period) {
-            '1m'  => date('Y-m-d', strtotime('-1 month')),
-            '3m'  => date('Y-m-d', strtotime('-3 months')),
-            '6m'  => date('Y-m-d', strtotime('-6 months')),
-            '1y'  => date('Y-m-d', strtotime('-1 year')),
-            '3y'  => date('Y-m-d', strtotime('-3 years')),
-            '5y'  => date('Y-m-d', strtotime('-5 years')),
+            '1m' => date('Y-m-d', strtotime('-1 month')),
+            '3m' => date('Y-m-d', strtotime('-3 months')),
+            '6m' => date('Y-m-d', strtotime('-6 months')),
+            '1y' => date('Y-m-d', strtotime('-1 year')),
+            '3y' => date('Y-m-d', strtotime('-3 years')),
+            '5y' => date('Y-m-d', strtotime('-5 years')),
             '10y' => date('Y-m-d', strtotime('-10 years')),
             'ytd' => date('Y-01-01'),
             'max' => '2000-01-01',
@@ -201,7 +215,7 @@ function getTimeSeriesData(PDO $db): array
     $data = $stmt->fetchAll();
 
     // Gösterge bilgisi
-    $stmt = $db->prepare("SELECT name_tr, name_en, unit, evds_code FROM indicators WHERE id = ?");
+    $stmt = $db->prepare("SELECT * FROM indicators WHERE id = ?");
     $stmt->execute([$id]);
     $indicator = $stmt->fetch();
 
@@ -223,16 +237,18 @@ function getComparisonData(PDO $db): array
 {
     $idsParam = $_GET['ids'] ?? '';
     $ids = array_filter(array_map('intval', explode(',', $idsParam)));
-    if (empty($ids)) return ['error' => 'ids parametresi gerekli (virgülle ayrılmış ID\'ler)'];
-    if (count($ids) > 5) return ['error' => 'En fazla 5 gösterge karşılaştırılabilir'];
+    if (empty($ids))
+        return ['error' => 'ids parametresi gerekli (virgülle ayrılmış ID\'ler)'];
+    if (count($ids) > 5)
+        return ['error' => 'En fazla 5 gösterge karşılaştırılabilir'];
 
     // Tarih aralığı (data endpoint'i ile aynı mantık)
     $period = $_GET['period'] ?? '5y';
     $endDate = date('Y-m-d');
     $startDate = match ($period) {
-        '1y'  => date('Y-m-d', strtotime('-1 year')),
-        '3y'  => date('Y-m-d', strtotime('-3 years')),
-        '5y'  => date('Y-m-d', strtotime('-5 years')),
+        '1y' => date('Y-m-d', strtotime('-1 year')),
+        '3y' => date('Y-m-d', strtotime('-3 years')),
+        '5y' => date('Y-m-d', strtotime('-5 years')),
         '10y' => date('Y-m-d', strtotime('-10 years')),
         'max' => '2000-01-01',
         default => date('Y-m-d', strtotime('-5 years')),
@@ -242,13 +258,20 @@ function getComparisonData(PDO $db): array
     $placeholders = str_repeat('?,', count($ids) - 1) . '?';
 
     // Gösterge bilgileri
-    $stmt = $db->prepare("SELECT id, name_tr, name_en, unit, evds_code FROM indicators WHERE id IN ($placeholders)");
+    // Gösterge bilgileri
+    $stmt = $db->prepare("SELECT * FROM indicators WHERE id IN ($placeholders)");
     $stmt->execute($ids);
-    $indicators = $stmt->fetchAll(PDO::FETCH_UNIQUE); // id => row
+    $rows = $stmt->fetchAll();
+
+    $indicators = [];
+    foreach ($rows as $row) {
+        $indicators[$row['id']] = $row;
+    }
 
     // Her gösterge için veri çek
     foreach ($ids as $id) {
-        if (!isset($indicators[$id])) continue;
+        if (!isset($indicators[$id]))
+            continue;
 
         $stmt = $db->prepare("
             SELECT date, value FROM data_points
@@ -320,7 +343,8 @@ function getLatestValues(PDO $db): array
 function searchIndicators(PDO $db): array
 {
     $query = $_GET['q'] ?? '';
-    if (strlen($query) < 2) return ['error' => 'En az 2 karakter girin'];
+    if (strlen($query) < 2)
+        return ['error' => 'En az 2 karakter girin'];
 
     $searchTerm = '%' . $query . '%';
     $stmt = $db->prepare("
@@ -386,10 +410,10 @@ function proxyToAnalysis(): array
     $ch = curl_init($pythonUrl . '/analyze');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => json_encode($requestData),
-        CURLOPT_TIMEOUT        => $timeout,
-        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($requestData),
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
     ]);
 
     $response = curl_exec($ch);
@@ -431,9 +455,9 @@ function prepareDataForAnalysis(PDO $db, array $request): array
 
     $endDate = date('Y-m-d');
     $startDate = match ($period) {
-        '1y'  => date('Y-m-d', strtotime('-1 year')),
-        '3y'  => date('Y-m-d', strtotime('-3 years')),
-        '5y'  => date('Y-m-d', strtotime('-5 years')),
+        '1y' => date('Y-m-d', strtotime('-1 year')),
+        '3y' => date('Y-m-d', strtotime('-3 years')),
+        '5y' => date('Y-m-d', strtotime('-5 years')),
         '10y' => date('Y-m-d', strtotime('-10 years')),
         default => date('Y-m-d', strtotime('-5 years')),
     };
@@ -479,7 +503,8 @@ function triggerFetch(): array
     }
 
     $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
-    if (!$id) return ['error' => 'id veya all parametresi gerekli'];
+    if (!$id)
+        return ['error' => 'id veya all parametresi gerekli'];
 
     return $evds->fetchIndicatorData($id);
 }

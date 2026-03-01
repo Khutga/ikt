@@ -18,6 +18,7 @@ build/
 .flutter-plugins
 .flutter-plugins-dependencies
 pubspec.lock
+android
 
 # IDE
 .idea/

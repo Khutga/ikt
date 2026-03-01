@@ -31,7 +31,8 @@ class ApiService {
   // =========================================
 
   /// Gösterge listesi (opsiyonel kategori filtresi)
-  Future<List<Indicator>> getIndicators({int? categoryId, String? categoryCode}) async {
+  Future<List<Indicator>> getIndicators(
+      {int? categoryId, String? categoryCode}) async {
     final params = <String, String>{'action': 'indicators'};
     if (categoryId != null) params['category'] = categoryId.toString();
     if (categoryCode != null) params['category_code'] = categoryCode;
@@ -60,7 +61,8 @@ class ApiService {
   // =========================================
 
   /// Tek gösterge zaman serisi verisi
-  Future<TimeSeries> getTimeSeriesData(int indicatorId, {String period = '1y'}) async {
+  Future<TimeSeries> getTimeSeriesData(int indicatorId,
+      {String period = '1y'}) async {
     final data = await _get({
       'action': 'data',
       'id': indicatorId.toString(),
@@ -113,10 +115,15 @@ class ApiService {
   /// Dashboard özet: tüm göstergelerin son değerleri (kategorize)
   Future<Map<String, DashboardCategory>> getLatestValues() async {
     final data = await _get({'action': 'latest'});
+
+    if (data['data'] is List) {
+      return {};
+    }
+    
     final grouped = data['data'] as Map<String, dynamic>;
 
-    return grouped.map((key, value) =>
-        MapEntry(key, DashboardCategory.fromJson(value)));
+    return grouped
+        .map((key, value) => MapEntry(key, DashboardCategory.fromJson(value)));
   }
 
   /// Sistem istatistikleri
@@ -158,18 +165,20 @@ class ApiService {
   }) async {
     final url = Uri.parse('${AppConfig.pythonServiceUrl}/chart-config');
 
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'chart_type': chartType,
-        'series_data': seriesData,
-        'title': title,
-        'overlay': overlay,
-        'normalize': normalize,
-        'params': params,
-      }),
-    ).timeout(_timeout);
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'chart_type': chartType,
+            'series_data': seriesData,
+            'title': title,
+            'overlay': overlay,
+            'normalize': normalize,
+            'params': params,
+          }),
+        )
+        .timeout(_timeout);
 
     final data = jsonDecode(response.body);
     if (data['success'] != true) {
@@ -200,11 +209,13 @@ class ApiService {
     final uri = Uri.parse(_baseUrl).replace(queryParameters: queryParams);
 
     try {
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(body),
-      ).timeout(_timeout);
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(_timeout);
 
       return _handleResponse(response);
     } catch (e) {
@@ -214,7 +225,8 @@ class ApiService {
 
   Map<String, dynamic> _handleResponse(http.Response response) {
     if (response.statusCode != 200) {
-      throw ApiException('HTTP ${response.statusCode}: ${response.reasonPhrase}');
+      throw ApiException(
+          'HTTP ${response.statusCode}: ${response.reasonPhrase}');
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;

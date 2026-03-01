@@ -85,8 +85,16 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
         [_indicatorA!.id, _indicatorB!.id],
         period: _period,
       );
-
-      final seriesDataForChart = series.map((s) => s.toAnalysisFormat()).toList();
+      if (series.any((s) => s.data.isEmpty)) {
+        setState(() {
+          _error =
+              'Seçilen göstergelerden birinde veya ikisinde de bu periyoda ait veri bulunmuyor. Lütfen farklı göstergeler seçin.';
+          _isAnalyzing = false;
+        });
+        return;
+      }
+      final seriesDataForChart =
+          series.map((s) => s.toAnalysisFormat()).toList();
 
       // 2. Overlay çizgi grafik config'i
       final overlayConfig = await _api.getChartConfig(
@@ -169,7 +177,8 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
                         child: SwitchListTile(
                           dense: true,
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('Normalize (0-100)', style: TextStyle(fontSize: 13)),
+                          title: const Text('Normalize (0-100)',
+                              style: TextStyle(fontSize: 13)),
                           value: _normalize,
                           onChanged: (val) => setState(() => _normalize = val),
                         ),
@@ -195,29 +204,36 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
 
                   // Analiz butonu
                   FilledButton.icon(
-                    onPressed: _indicatorA != null && _indicatorB != null && !_isAnalyzing
+                    onPressed: _indicatorA != null &&
+                            _indicatorB != null &&
+                            !_isAnalyzing
                         ? _runAnalysis
                         : null,
                     icon: _isAnalyzing
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
                           )
                         : const Icon(Icons.analytics),
-                    label: Text(_isAnalyzing ? 'Analiz ediliyor...' : 'Analiz Et'),
+                    label:
+                        Text(_isAnalyzing ? 'Analiz ediliyor...' : 'Analiz Et'),
                   ),
 
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
-                      child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                      child: Text(_error!,
+                          style:
+                              const TextStyle(color: Colors.red, fontSize: 13)),
                     ),
 
                   // Sonuçlar
                   if (_overlayConfig != null) ...[
                     const SizedBox(height: 24),
-                    Text('Zaman Serisi Karşılaştırma', style: theme.textTheme.titleSmall),
+                    Text('Zaman Serisi Karşılaştırma',
+                        style: theme.textTheme.titleSmall),
                     const SizedBox(height: 8),
                     PlotlyChart(
                       plotlyConfig: _overlayConfig!,
@@ -249,7 +265,8 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
     );
   }
 
-  Widget _buildSelector(String label, Indicator? selected, ValueChanged<Indicator> onChanged) {
+  Widget _buildSelector(
+      String label, Indicator? selected, ValueChanged<Indicator> onChanged) {
     return DropdownButtonFormField<int>(
       value: selected?.id,
       decoration: InputDecoration(
