@@ -4,15 +4,15 @@ import 'package:macro_dashboard/config/chart_config_builder.dart';
 
 import '../services/api_service.dart';
 import '../services/explainer_service.dart';
+import '../services/technical_indicators.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../widgets/plotly_chart.dart';
 
 /// Grafik Detay Ekranı
 ///
-/// Hafta 2:
-///   🎓 AppBar'da "Bu ne?" toggle → eğitim kartı (education_tr JSON)
-///   💡 Grafik altında "Bana Açıkla" toggle → otomatik yorum
+/// Hafta 2: 🎓 "Bu ne?" toggle + 💡 "Bana Açıkla" toggle
+/// Hafta 4: 📊 Teknik göstergeler (SMA/EMA/Bollinger/RSI)
 class ChartScreen extends StatefulWidget {
   final int indicatorId;
   final String indicatorName;
@@ -31,6 +31,7 @@ class _ChartScreenState extends State<ChartScreen> {
   final _api = ApiService();
   final _chartBuilder = ChartConfigBuilder();
   final _explainer = ExplainerService();
+  final _techIndicators = TechnicalIndicators();
 
   String _period = '1y';
   String _chartType = 'line';
@@ -46,6 +47,14 @@ class _ChartScreenState extends State<ChartScreen> {
   bool _showExplain = false;
   Map<String, dynamic>? _educationData;
   String? _explainText;
+
+  // ★ Hafta 4 state — Teknik göstergeler
+  bool _showTechPanel = false;
+  final Set<String> _activeTechIndicators = {};
+  int _smaPeriod = 20;
+  int _emaShortPeriod = 12;
+  int _emaLongPeriod = 26;
+  String? _techSummary;
 
   @override
   void initState() {
@@ -67,24 +76,46 @@ class _ChartScreenState extends State<ChartScreen> {
         return;
       }
 
-      final config = _chartBuilder.build(
-        chartType: _chartType,
-        seriesData: [ts.toAnalysisFormat()],
-        title: ts.indicator.nameTr,
-      );
-
       // Eğitim verisi parse
       _educationData = _parseEdu(ts.indicator.educationTr);
 
       // Otomatik yorum üret
       _explainText = _explainer.explain(ts);
 
+      // Teknik analiz özeti
+      _techSummary = _techIndicators.generateSummary(ts.data);
+
+      _rebuildChart();
       _loadTrendAnalysis();
 
-      setState(() { _plotlyConfig = config; _isLoading = false; });
+      setState(() { _isLoading = false; });
     } catch (e) {
       setState(() { _error = e.toString(); _isLoading = false; });
     }
+  }
+
+  void _rebuildChart() {
+    if (_timeSeries == null || _timeSeries!.data.isEmpty) return;
+
+    final config = _chartBuilder.build(
+      chartType: _chartType,
+      seriesData: [_timeSeries!.toAnalysisFormat()],
+      title: _timeSeries!.indicator.nameTr,
+    );
+
+    // Teknik gösterge trace'lerini ekle
+    if (_activeTechIndicators.isNotEmpty && _chartType == 'line') {
+      final techTraces = _techIndicators.buildOverlayTraces(
+        data: _timeSeries!.data,
+        activeIndicators: _activeTechIndicators,
+        smaPeriod: _smaPeriod,
+        emaShortPeriod: _emaShortPeriod,
+        emaLongPeriod: _emaLongPeriod,
+      );
+      (config['data'] as List).addAll(techTraces);
+    }
+
+    setState(() { _plotlyConfig = config; });
   }
 
   Map<String, dynamic>? _parseEdu(String? raw) {
@@ -107,16 +138,19 @@ class _ChartScreenState extends State<ChartScreen> {
   void _onPeriodChanged(String p) { _period = p; _loadData(); }
 
   void _onChartTypeChanged(String t) {
-    if (_timeSeries != null && _timeSeries!.data.isNotEmpty) {
-      setState(() {
-        _chartType = t;
-        _plotlyConfig = _chartBuilder.build(
-          chartType: t,
-          seriesData: [_timeSeries!.toAnalysisFormat()],
-          title: _timeSeries!.indicator.nameTr,
-        );
-      });
-    }
+    _chartType = t;
+    _rebuildChart();
+  }
+
+  void _toggleTechIndicator(String indicator) {
+    setState(() {
+      if (_activeTechIndicators.contains(indicator)) {
+        _activeTechIndicators.remove(indicator);
+      } else {
+        _activeTechIndicators.add(indicator);
+      }
+      _rebuildChart();
+    });
   }
 
   @override
@@ -180,6 +214,10 @@ class _ChartScreenState extends State<ChartScreen> {
                       child: PlotlyChart(plotlyConfig: _plotlyConfig!, height: 350, darkMode: isDark),
                     ),
 
+                  // ═══ Hafta 4: Teknik Göstergeler ═══
+                  _buildTechIndicatorsToggle(),
+                  if (_showTechPanel) _buildTechPanel(),
+
                   // ── 💡 Bana Açıkla toggle ──
                   _buildExplainToggle(),
 
@@ -198,7 +236,197 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   // ═══════════════════════════════════════════
-  //  🎓 EĞİTİM KARTI
+  //  📊 HAFTA 4: TEKNİK GÖSTERGELER
+  // ═══════════════════════════════════════════
+
+  Widget _buildTechIndicatorsToggle() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => setState(() => _showTechPanel = !_showTechPanel),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: _showTechPanel
+                ? const Color(0xFF45B7D1).withOpacity(0.1)
+                : const Color(0xFF16213E),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: _showTechPanel
+                  ? const Color(0xFF45B7D1).withOpacity(0.4)
+                  : const Color(0xFF2A2A4A),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.candlestick_chart,
+                size: 18,
+                color: _showTechPanel ? const Color(0xFF45B7D1) : Colors.grey[400],
+              ),
+              const SizedBox(width: 8),
+              Text('Teknik Göstergeler',
+                style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w500,
+                  color: _showTechPanel ? const Color(0xFF45B7D1) : Colors.grey[400],
+                ),
+              ),
+              if (_activeTechIndicators.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF45B7D1).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${_activeTechIndicators.length}',
+                    style: const TextStyle(fontSize: 10, color: Color(0xFF45B7D1)),
+                  ),
+                ),
+              ],
+              const Spacer(),
+              Icon(
+                _showTechPanel ? Icons.expand_less : Icons.expand_more,
+                size: 20, color: Colors.grey[500],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTechPanel() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Card(
+        elevation: 0,
+        color: const Color(0xFF16213E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: const Color(0xFF45B7D1).withOpacity(0.3)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // SMA
+              _techChip('sma', 'SMA($_smaPeriod)', const Color(0xFFFFA726),
+                  'Basit Hareketli Ortalama'),
+              // EMA Kısa
+              _techChip('ema_short', 'EMA($_emaShortPeriod)', const Color(0xFFE91E63),
+                  'Kısa Vadeli Üstel HO'),
+              // EMA Uzun
+              _techChip('ema_long', 'EMA($_emaLongPeriod)', const Color(0xFF9C27B0),
+                  'Uzun Vadeli Üstel HO'),
+              // Bollinger
+              _techChip('bollinger', 'Bollinger Bantları', const Color(0xFF78909C),
+                  '±2 Standart Sapma'),
+
+              // Periyot ayarları
+              if (_activeTechIndicators.isNotEmpty) ...[
+                const Divider(height: 20, color: Color(0xFF2A2A4A)),
+                Row(
+                  children: [
+                    _periodInput('SMA', _smaPeriod, (v) {
+                      _smaPeriod = v;
+                      _rebuildChart();
+                    }),
+                    const SizedBox(width: 10),
+                    _periodInput('EMA Kısa', _emaShortPeriod, (v) {
+                      _emaShortPeriod = v;
+                      _rebuildChart();
+                    }),
+                    const SizedBox(width: 10),
+                    _periodInput('EMA Uzun', _emaLongPeriod, (v) {
+                      _emaLongPeriod = v;
+                      _rebuildChart();
+                    }),
+                  ],
+                ),
+              ],
+
+              // Teknik analiz özeti
+              if (_techSummary != null && _activeTechIndicators.isNotEmpty) ...[
+                const Divider(height: 20, color: Color(0xFF2A2A4A)),
+                Text(_techSummary!,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[300], height: 1.5)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _techChip(String key, String label, Color color, String subtitle) {
+    final isActive = _activeTechIndicators.contains(key);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _toggleTechIndicator(key),
+        child: Row(
+          children: [
+            Container(
+              width: 16, height: 16,
+              decoration: BoxDecoration(
+                color: isActive ? color : Colors.transparent,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: isActive ? color : const Color(0xFF2A2A4A)),
+              ),
+              child: isActive
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  : null,
+            ),
+            const SizedBox(width: 10),
+            Container(width: 16, height: 2, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w500,
+                    color: isActive ? Colors.white : Colors.grey[400],
+                  )),
+                  Text(subtitle, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _periodInput(String label, int value, Function(int) onChanged) {
+    return Expanded(
+      child: TextField(
+        decoration: InputDecoration(
+          labelText: label,
+          isDense: true,
+          border: const OutlineInputBorder(),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        ),
+        keyboardType: TextInputType.number,
+        controller: TextEditingController(text: value.toString()),
+        style: const TextStyle(fontSize: 12),
+        onSubmitted: (val) {
+          final v = int.tryParse(val);
+          if (v != null && v > 0 && v < 500) {
+            onChanged(v);
+          }
+        },
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  //  🎓 EĞİTİM KARTI (Hafta 2)
   // ═══════════════════════════════════════════
 
   Widget _buildEducationCard() {
@@ -217,7 +445,6 @@ class _ChartScreenState extends State<ChartScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Başlık + kapat
               Row(children: [
                 const Icon(Icons.school, size: 20, color: Color(0xFF4ECDC4)),
                 const SizedBox(width: 8),
@@ -231,9 +458,7 @@ class _ChartScreenState extends State<ChartScreen> {
                 ),
               ]),
               const SizedBox(height: 14),
-
-              if (d['nedir'] != null)
-                _eduBlock('📖 Nedir?', d['nedir']),
+              if (d['nedir'] != null) _eduBlock('📖 Nedir?', d['nedir']),
               if (d['neden_onemli'] != null) ...[
                 const SizedBox(height: 12),
                 _eduBlock('💡 Neden Önemli?', d['neden_onemli']),
@@ -242,8 +467,6 @@ class _ChartScreenState extends State<ChartScreen> {
                 const SizedBox(height: 12),
                 _eduBlock('🔍 Nasıl Okunur?', d['nasil_okunur']),
               ],
-
-              // İlişkili göstergeler chip'leri
               if (d['iliskili'] != null) ...[
                 const SizedBox(height: 14),
                 Wrap(
@@ -281,7 +504,7 @@ class _ChartScreenState extends State<ChartScreen> {
   }
 
   // ═══════════════════════════════════════════
-  //  💡 BANA AÇIKLA
+  //  💡 BANA AÇIKLA (Hafta 2)
   // ═══════════════════════════════════════════
 
   Widget _buildExplainToggle() {

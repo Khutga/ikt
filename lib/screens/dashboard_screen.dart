@@ -4,6 +4,8 @@ import '../services/favorites_service.dart';
 import 'chart_screen.dart';
 import '../widgets/common_widgets.dart';
 import 'comparison_screen.dart';
+import 'correlation_matrix_screen.dart';
+import 'glossary_screen.dart';
 import '../models/models.dart';
 import 'search_screen.dart';
 
@@ -11,6 +13,9 @@ import 'search_screen.dart';
 ///
 /// Favoriler en üstte, ardından kategoriler.
 /// Her kartta sparkline mini grafik gösterilir.
+///
+/// Hafta 3: Sözlük navigasyonu eklendi
+/// Hafta 5: Korelasyon matrisi navigasyonu eklendi
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -58,13 +63,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  /// Tüm göstergeleri düz listede topla
   List<DashboardIndicator> get _allIndicators {
     if (_data == null) return [];
     return _data!.values.expand((cat) => cat.indicators).toList();
   }
 
-  /// Favori göstergeler
   List<DashboardIndicator> get _favoriteIndicators {
     final all = _allIndicators;
     return _favoriteIds
@@ -107,17 +110,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.search, size: 22),
+            tooltip: 'Ara',
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SearchScreen()),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.compare_arrows, size: 22),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ComparisonScreen()),
-            ),
+          // ★ Araçlar menüsü
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, size: 22),
+            onSelected: (value) {
+              switch (value) {
+                case 'compare':
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const ComparisonScreen()));
+                  break;
+                case 'matrix':
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const CorrelationMatrixScreen()));
+                  break;
+                case 'glossary':
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const GlossaryScreen()));
+                  break;
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'compare',
+                child: Row(children: [
+                  Icon(Icons.compare_arrows, size: 20, color: Color(0xFF4ECDC4)),
+                  SizedBox(width: 10),
+                  Text('Karşılaştır'),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: 'matrix',
+                child: Row(children: [
+                  Icon(Icons.grid_on, size: 20, color: Color(0xFF45B7D1)),
+                  SizedBox(width: 10),
+                  Text('Korelasyon Matrisi'),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: 'glossary',
+                child: Row(children: [
+                  Icon(Icons.menu_book, size: 20, color: Color(0xFFFFA726)),
+                  SizedBox(width: 10),
+                  Text('Ekonomi Sözlüğü'),
+                ]),
+              ),
+            ],
           ),
         ],
       ),
@@ -144,6 +187,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 32),
         children: [
+          // ★ Hızlı erişim araç kartları
+          _buildQuickActions(),
+
           // Favoriler bölümü
           if (_favoriteIndicators.isNotEmpty) ...[
             _buildFavoritesSection(),
@@ -193,7 +239,76 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  /// Favoriler bölümü — yatay kaydırma
+  /// ★ Hızlı erişim kartları — yeni özellikler
+  Widget _buildQuickActions() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Row(
+        children: [
+          _quickActionCard(
+            icon: Icons.grid_on,
+            label: 'Korelasyon\nMatrisi',
+            color: const Color(0xFF45B7D1),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CorrelationMatrixScreen())),
+          ),
+          const SizedBox(width: 8),
+          _quickActionCard(
+            icon: Icons.compare_arrows,
+            label: 'Karşılaştır\n& Analiz',
+            color: const Color(0xFF4ECDC4),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const ComparisonScreen())),
+          ),
+          const SizedBox(width: 8),
+          _quickActionCard(
+            icon: Icons.menu_book,
+            label: 'Ekonomi\nSözlüğü',
+            color: const Color(0xFFFFA726),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const GlossaryScreen())),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _quickActionCard({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: Card(
+        elevation: 0,
+        color: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: color.withOpacity(0.2)),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+            child: Column(
+              children: [
+                Icon(icon, size: 22, color: color),
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildFavoritesSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
