@@ -60,6 +60,7 @@ try {
         'search' => searchIndicators($db),
         'analyze' => proxyToAnalysis(),
         'fetch' => triggerFetch(),
+        'econometrics' => proxyToEconometrics(),
         'stats' => getSystemStats($db),
         'countries'       => getCountries(),
     'intl_indicators' => getIntlIndicators(),
@@ -806,4 +807,160 @@ function triggerIntlFetchAll(): array
 {
     $wb = new WorldBankService();
     return ['success' => true, 'results' => $wb->fetchAllActive()];
+}
+
+/**
+ * api.php'ye eklenecek ekonometri endpoint kodu
+ *
+ * ─────────────────────────────────────────────────
+ * 1. Router'a ekleyin (match bloğuna):
+ * ─────────────────────────────────────────────────
+ *
+ *   'econometrics' => proxyToEconometrics(),
+ *
+ * ─────────────────────────────────────────────────
+ * 2. Bu fonksiyonu api.php'nin sonuna ekleyin:
+ * ─────────────────────────────────────────────────
+ */
+
+/**
+ * POST /api.php?action=econometrics
+ * Python ekonometri servisine proxy
+ * 
+ * Body: {
+ *   "method": "unit_root|cointegration|granger|var_model|ardl|garch|ols|descriptive|full_analysis",
+ *   "series_data": [...],   // Seri verileri (indicator_ids varsa DB'den çekilir)
+ *   "params": {},
+ *   "dependent_index": 0
+ * }
+ */
+function proxyToEconometrics(): array
+{
+    $config = require __DIR__ . '/config/config.php';
+    $pythonUrl = $config['python_service']['base_url'];
+    $timeout = 120; // Ekonometrik analizler uzun sürebilir
+
+    $body = file_get_contents('php://input');
+    $requestData = json_decode($body, true);
+
+    if (!$requestData || !isset($requestData['method'])) {
+        return ['error' => 'Geçersiz istek. "method" parametresi gerekli.'];
+    }
+
+    $db = Database::getConnection();
+
+    // ── Eğer series_data yerine indicator_ids geliyorsa, veriyi DB'den çek ──
+    if (isset($requestData['indicator_ids']) && !isset($requestData['series_data'])) {
+        $period = $requestData['period'] ?? '5y';
+        $seriesData = [];
+        
+        foreach ($requestData['indicator_ids'] as $id) {
+            $stmt = $db->prepare("SELECT i.name_tr, i.evds_code, i.unit FROM indicators i WHERE i.id = ?");
+            $stmt->execute([$id]);
+            $indicator = $stmt->fetch();
+
+            $endDate = date('Y-m-d');
+            $startDate = match ($period) {
+                '1y' => date('Y-m-d', strtotime('-1 year')),
+                '3y' => date('Y-m-d', strtotime('-3 years')),
+                '5y' => date('Y-m-d', strtotime('-5 years')),
+                '10y' => date('Y-m-d', strtotime('-10 years')),
+                'max' => '2000-01-01',
+                default => date('Y-m-d', strtotime('-5 years')),
+            };
+
+            $stmt = $db->prepare(
+                "SELECT date, value FROM data_points WHERE indicator_id = ? AND date BETWEEN ? AND ? ORDER BY date ASC"
+            );
+            $stmt->execute([$id, $startDate, $endDate]);
+
+            $seriesData[] = [
+                'indicator_id' => (int) $id,
+                'name' => $indicator['name_tr'] ?? "Gösterge #$id",
+                'code' => $indicator['evds_code'] ?? '',
+                'unit' => $indicator['unit'] ?? '',
+                'data' => $stmt->fetchAll(),
+            ];
+        }
+
+        $requestData['series_data'] = $seriesData;
+    }
+
+    // ── Cache kontrolü ──
+    $cacheKey = md5(json_encode([
+        'econometrics',
+        $requestData['method'],
+        $requestData['series_data'] ?? [],
+        $requestData['params'] ?? [],
+    ]));
+
+    $stmt = $db->prepare(
+        "SELECT result FROM analysis_cache WHERE cache_key = ? AND expires_at > NOW()"
+    );
+    $stmt->execute([$cacheKey]);
+    $cached = $stmt->fetch();
+
+    if ($cached) {
+        $result = json_decode($cached['result'], true);
+        $result['from_cache'] = true;
+        return ['success' => true, 'data' => $result];
+    }
+
+    // ── Python servisine gönder ──
+    $ch = curl_init($pythonUrl . '/econometrics');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($requestData),
+        CURLOPT_TIMEOUT => $timeout,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlError) {
+        return [
+            'error' => 'Python servisi ile bağlantı kurulamadı',
+            'detail' => $curlError,
+            'hint' => 'Python servisinin çalıştığından emin olun: uvicorn app.main:app --port 8001',
+        ];
+    }
+
+    if ($httpCode !== 200 || !$response) {
+        $errorDetail = '';
+        if ($response) {
+            $decoded = json_decode($response, true);
+            $errorDetail = $decoded['detail'] ?? substr($response, 0, 500);
+        }
+        return [
+            'error' => "Ekonometrik analiz hatası (HTTP $httpCode)",
+            'detail' => $errorDetail,
+        ];
+    }
+
+    $result = json_decode($response, true);
+
+    // ── Cache'e yaz (ekonometrik analizler için 2 saat) ──
+    try {
+        $stmt = $db->prepare("
+            INSERT INTO analysis_cache (cache_key, analysis_type, indicator_ids, parameters, result, expires_at)
+            VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7200 SECOND))
+            ON DUPLICATE KEY UPDATE result = VALUES(result), expires_at = VALUES(expires_at)
+        ");
+        $stmt->execute([
+            $cacheKey,
+            'statistics', // enum değeri — DB şeması genişletilmeli veya 'statistics' kullanılmalı
+            json_encode($requestData['indicator_ids'] ?? []),
+            json_encode($requestData['params'] ?? []),
+            json_encode($result),
+        ]);
+    } catch (Exception $e) {
+        // Cache yazma hatası analizi engellemez
+        error_log("Econometrics cache write error: " . $e->getMessage());
+    }
+
+    return ['success' => true, 'data' => $result];
 }
