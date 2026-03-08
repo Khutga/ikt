@@ -1,16 +1,12 @@
 <?php
 /**
- * WorldBankService - Dünya Bankası API ile iletişim katmanı
+ * WorldBankService - Dünya Bankası API ile iletişim katmanı (v2 - BUG FIX)
  * 
- * Ülkeler arası kıyaslama verileri için Dünya Bankası Open Data API kullanır.
- * API Key gerektirmez, rate limit cömerttir.
- * 
- * API Dökümantasyon: https://datahelpdesk.worldbank.org/knowledgebase/articles/889392
- * 
- * Base URL: https://api.worldbank.org/v2/
- * Format: JSON (format=json)
- * Tarih: date=2015:2024 (yıl aralığı)
- * Çoklu ülke: country/TUR;USA;DEU
+ * Düzeltmeler:
+ * 1. fetchIndicatorData(): null indicator erişim hatası ($indicator['source_code'] crash) 
+ * 2. parseAndStore(): countryiso3code doğru okunuyor
+ * 3. findCountryId(): performans için cache eklendi
+ * 4. Tüm fonksiyonlarda error handling güçlendirildi
  */
 
 require_once __DIR__ . '/../config/Database.php';
@@ -21,6 +17,7 @@ class WorldBankService
     private string $baseUrl = 'https://api.worldbank.org/v2/';
     private int $timeout = 30;
     private int $perPage = 1000;
+    private array $countryIdCache = [];
 
     public function __construct()
     {
@@ -31,15 +28,6 @@ class WorldBankService
     // ANA VERİ ÇEKME
     // =========================================
 
-    /**
-     * Tek bir gösterge için birden fazla ülkenin verisini çeker
-     * 
-     * @param int $intlIndicatorId  international_indicators tablosundaki ID
-     * @param array $countryCodes   ISO3 kodları ['TUR','USA','DEU']
-     * @param int $startYear        Başlangıç yılı
-     * @param int $endYear          Bitiş yılı
-     * @return array
-     */
     public function fetchIndicatorData(
         int $intlIndicatorId,
         array $countryCodes = [],
@@ -47,78 +35,66 @@ class WorldBankService
         int $endYear = 0
     ): array {
         $startTime = microtime(true);
-
-        if ($endYear === 0) {
-            $endYear = (int) date('Y');
-        }
+        if ($endYear === 0) $endYear = (int) date('Y');
 
         try {
-            // 1. Gösterge bilgisini al
             $stmt = $this->db->prepare(
                 "SELECT * FROM international_indicators WHERE id = ? AND is_active = 1"
             );
             $stmt->execute([$intlIndicatorId]);
             $indicator = $stmt->fetch();
 
+            // ★ FIX: null check BEFORE accessing properties
             if (!$indicator) {
-                return $this->logResult('worldbank', $indicator['source_code'] ?? '', 'error', 0, 0, 'Gösterge bulunamadı', $startTime);
+                return $this->logResult('worldbank', "id:$intlIndicatorId", 'error', 0, 0, 'Gösterge bulunamadı', $startTime);
             }
 
-            // 2. Ülke kodlarını belirle (boşsa tüm aktif ülkeler)
+            $sourceCode = $indicator['source_code'];
+
             if (empty($countryCodes)) {
                 $countryCodes = $this->getActiveCountryCodes();
             }
+            if (empty($countryCodes)) {
+                return $this->logResult('worldbank', $sourceCode, 'error', 0, 0, 'Aktif ülke bulunamadı', $startTime);
+            }
 
-            // 3. API çağrısı
-            $sourceCode = $indicator['source_code'];
             $countryParam = implode(';', $countryCodes);
             $rawData = $this->callApi(
                 "country/{$countryParam}/indicator/{$sourceCode}",
                 ['date' => "{$startYear}:{$endYear}"]
             );
 
-            if ($rawData === null) {
-                return $this->logResult('worldbank', $sourceCode, 'error', 0, 0, 'API yanıt vermedi', $startTime);
+            if ($rawData === null || empty($rawData)) {
+                return $this->logResult('worldbank', $sourceCode, 'error', 0, 0, 'API boş yanıt döndü', $startTime);
             }
 
-            // 4. Veriyi parse et ve DB'ye yaz
             $result = $this->parseAndStore($intlIndicatorId, $rawData);
-
-            // 5. Meta güncelle
             $this->updateIndicatorMeta($intlIndicatorId);
 
             return $this->logResult(
                 'worldbank', $sourceCode, 'success',
                 $result['fetched'], $result['inserted'],
-                "Başarılı: {$result['inserted']} yeni kayıt ({$result['countries']} ülke)",
+                "Başarılı: {$result['inserted']} kayıt ({$result['countries']} ülke)",
                 $startTime
             );
-
         } catch (Exception $e) {
-            error_log("WorldBank fetch error: " . $e->getMessage());
+            error_log("WorldBank fetch error (id:$intlIndicatorId): " . $e->getMessage());
             return $this->logResult('worldbank', '', 'error', 0, 0, $e->getMessage(), $startTime);
         }
     }
 
-    /**
-     * Tüm aktif uluslararası göstergeleri günceller
-     */
     public function fetchAllActive(array $countryCodes = []): array
     {
         $results = [];
-
         $stmt = $this->db->query(
             "SELECT id, source_code FROM international_indicators WHERE is_active = 1 AND source_type = 'worldbank' ORDER BY id"
         );
         $indicators = $stmt->fetchAll();
 
         foreach ($indicators as $ind) {
-            // Rate limit: İstekler arası bekleme
-            usleep(500000); // 0.5 saniye
-
+            usleep(500000);
             $results[$ind['id']] = $this->fetchIndicatorData($ind['id'], $countryCodes);
         }
-
         return $results;
     }
 
@@ -126,15 +102,6 @@ class WorldBankService
     // VERİ SORGULAMA (Flutter API için)
     // =========================================
 
-    /**
-     * Ülke kıyaslama verisi döner
-     * 
-     * @param int $intlIndicatorId
-     * @param array $countryCodes  ISO3 kodları
-     * @param int $startYear
-     * @param int $endYear
-     * @return array
-     */
     public function getComparisonData(
         int $intlIndicatorId,
         array $countryCodes,
@@ -143,14 +110,13 @@ class WorldBankService
     ): array {
         if ($endYear === 0) $endYear = (int) date('Y');
 
-        // Gösterge bilgisi
         $stmt = $this->db->prepare("SELECT * FROM international_indicators WHERE id = ?");
         $stmt->execute([$intlIndicatorId]);
         $indicator = $stmt->fetch();
-
         if (!$indicator) return ['error' => 'Gösterge bulunamadı'];
 
-        // Ülke ID'lerini bul
+        if (empty($countryCodes)) return ['error' => 'Ülke kodu gerekli'];
+
         $placeholders = str_repeat('?,', count($countryCodes) - 1) . '?';
         $stmt = $this->db->prepare(
             "SELECT id, iso_code, name_tr, flag_emoji FROM countries WHERE iso_code IN ($placeholders) AND is_active = 1"
@@ -158,12 +124,8 @@ class WorldBankService
         $stmt->execute($countryCodes);
         $countries = $stmt->fetchAll();
 
-        $countryMap = [];
-        foreach ($countries as $c) {
-            $countryMap[$c['id']] = $c;
-        }
+        if (empty($countries)) return ['error' => 'Seçilen ülkeler bulunamadı'];
 
-        // Her ülke için veri çek
         $series = [];
         foreach ($countries as $country) {
             $stmt = $this->db->prepare("
@@ -194,15 +156,13 @@ class WorldBankService
                 'name_en' => $indicator['name_en'],
                 'unit' => $indicator['unit'],
                 'source_type' => $indicator['source_type'],
+                'decimal_places' => $indicator['decimal_places'] ?? 2,
             ],
             'period' => ['start' => $startYear, 'end' => $endYear],
             'series' => $series,
         ];
     }
 
-    /**
-     * Tüm uluslararası göstergeleri listele
-     */
     public function getIndicators(?string $categoryCode = null): array
     {
         $sql = "
@@ -212,28 +172,20 @@ class WorldBankService
             WHERE ii.is_active = 1
         ";
         $params = [];
-
         if ($categoryCode) {
             $sql .= " AND c.code = ?";
             $params[] = $categoryCode;
         }
-
         $sql .= " ORDER BY c.sort_order, ii.id";
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
-
         return $stmt->fetchAll();
     }
 
-    /**
-     * Aktif ülkeleri listele
-     */
     public function getCountries(): array
     {
-        $stmt = $this->db->query(
-            "SELECT * FROM countries WHERE is_active = 1 ORDER BY sort_order"
-        );
+        $stmt = $this->db->query("SELECT * FROM countries WHERE is_active = 1 ORDER BY sort_order");
         return $stmt->fetchAll();
     }
 
@@ -245,7 +197,6 @@ class WorldBankService
     {
         $params['format'] = 'json';
         $params['per_page'] = $this->perPage;
-
         $url = $this->baseUrl . $endpoint . '?' . http_build_query($params);
 
         $ch = curl_init();
@@ -263,53 +214,29 @@ class WorldBankService
         $error = curl_error($ch);
         curl_close($ch);
 
-        if ($error) {
-            error_log("WorldBank cURL error: $error");
-            return null;
-        }
-
-        if ($httpCode !== 200) {
-            error_log("WorldBank API HTTP $httpCode: $response");
-            return null;
-        }
+        if ($error) { error_log("WorldBank cURL: $error"); return null; }
+        if ($httpCode !== 200) { error_log("WorldBank HTTP $httpCode"); return null; }
 
         $decoded = json_decode($response, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            error_log("WorldBank JSON parse error: " . json_last_error_msg());
-            return null;
-        }
+        if (json_last_error() !== JSON_ERROR_NONE) return null;
 
-        // Dünya Bankası API [metadata, data] formatında döner
-        if (is_array($decoded) && count($decoded) >= 2) {
-            return $decoded[1] ?? [];
+        // WB format: [metadata, data]
+        if (is_array($decoded) && count($decoded) >= 2 && is_array($decoded[1])) {
+            return $decoded[1];
         }
-
-        return $decoded;
+        return is_array($decoded) ? $decoded : null;
     }
 
     // =========================================
     // VERİ İŞLEME
     // =========================================
 
-    /**
-     * Dünya Bankası API yanıtını parse edip DB'ye yazar
-     * 
-     * WB API format:
-     * [
-     *   { "country": {"id": "TR", "value": "Turkiye"},
-     *     "date": "2023", "value": 53.86, "indicator": {...} },
-     *   ...
-     * ]
-     */
     private function parseAndStore(int $intlIndicatorId, array $rawData): array
     {
         $fetched = count($rawData);
         $inserted = 0;
         $countriesSeen = [];
-
-        if (empty($rawData)) {
-            return ['fetched' => 0, 'inserted' => 0, 'countries' => 0];
-        }
+        if (empty($rawData)) return ['fetched' => 0, 'inserted' => 0, 'countries' => 0];
 
         $stmt = $this->db->prepare(
             "INSERT INTO international_data_points (intl_indicator_id, country_id, date, value)
@@ -318,21 +245,19 @@ class WorldBankService
         );
 
         $this->db->beginTransaction();
-
         try {
             foreach ($rawData as $item) {
-                $countryIso2 = $item['countryiso3code'] ?? ($item['country']['id'] ?? null);
+                // ★ FIX: WB API returns countryiso3code field
+                $countryCode = $item['countryiso3code'] ?? $item['country']['id'] ?? null;
                 $value = $item['value'] ?? null;
                 $dateStr = $item['date'] ?? null;
 
-                if ($countryIso2 === null || $value === null || $dateStr === null) continue;
+                if (!$countryCode || $value === null || $dateStr === null) continue;
                 if (!is_numeric($value)) continue;
 
-                // Ülke ID'sini bul (ISO3 veya ISO2)
-                $countryId = $this->findCountryId($countryIso2);
+                $countryId = $this->findCountryId($countryCode);
                 if (!$countryId) continue;
 
-                // Yıl → tarih formatı
                 $date = strlen($dateStr) === 4 ? "{$dateStr}-01-01" : $dateStr;
 
                 $stmt->execute([
@@ -341,33 +266,28 @@ class WorldBankService
                     ':date' => $date,
                     ':value' => (float) $value,
                 ]);
-
                 if ($stmt->rowCount() > 0) $inserted++;
-                $countriesSeen[$countryIso2] = true;
+                $countriesSeen[$countryCode] = true;
             }
-
             $this->db->commit();
         } catch (Exception $e) {
             $this->db->rollBack();
             throw $e;
         }
 
-        return [
-            'fetched' => $fetched,
-            'inserted' => $inserted,
-            'countries' => count($countriesSeen),
-        ];
+        return ['fetched' => $fetched, 'inserted' => $inserted, 'countries' => count($countriesSeen)];
     }
 
+    // ★ FIX: Cache eklendi
     private function findCountryId(string $code): ?int
     {
-        // Önce ISO3 ile dene
-        $stmt = $this->db->prepare(
-            "SELECT id FROM countries WHERE iso_code = ? OR iso2 = ? LIMIT 1"
-        );
+        if (isset($this->countryIdCache[$code])) return $this->countryIdCache[$code];
+        $stmt = $this->db->prepare("SELECT id FROM countries WHERE iso_code = ? OR iso2 = ? LIMIT 1");
         $stmt->execute([$code, $code]);
         $row = $stmt->fetch();
-        return $row ? (int) $row['id'] : null;
+        $id = $row ? (int) $row['id'] : null;
+        $this->countryIdCache[$code] = $id;
+        return $id;
     }
 
     private function getActiveCountryCodes(): array
@@ -378,43 +298,18 @@ class WorldBankService
 
     private function updateIndicatorMeta(int $intlIndicatorId): void
     {
-        $this->db->prepare("
-            UPDATE international_indicators SET last_fetched_at = NOW() WHERE id = ?
-        ")->execute([$intlIndicatorId]);
+        $this->db->prepare("UPDATE international_indicators SET last_fetched_at = NOW() WHERE id = ?")->execute([$intlIndicatorId]);
     }
 
-    private function logResult(
-        string $sourceType,
-        string $indicatorCode,
-        string $status,
-        int $fetched,
-        int $inserted,
-        string $message,
-        float $startTime
-    ): array {
+    private function logResult(string $sourceType, string $indicatorCode, string $status, int $fetched, int $inserted, string $message, float $startTime): array
+    {
         $executionMs = (int) ((microtime(true) - $startTime) * 1000);
-
         try {
-            $stmt = $this->db->prepare("
-                INSERT INTO external_fetch_logs (source_type, indicator_code, status, records_fetched, records_inserted, error_message, execution_time_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ");
-            $stmt->execute([
-                $sourceType, $indicatorCode, $status,
-                $fetched, $inserted,
-                $status === 'error' ? $message : null,
-                $executionMs,
-            ]);
+            $stmt = $this->db->prepare("INSERT INTO external_fetch_logs (source_type, indicator_code, status, records_fetched, records_inserted, error_message, execution_time_ms) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$sourceType, $indicatorCode, $status, $fetched, $inserted, $status === 'error' ? $message : null, $executionMs]);
         } catch (Exception $e) {
             error_log("Log write error: " . $e->getMessage());
         }
-
-        return [
-            'success' => $status === 'success',
-            'fetched' => $fetched,
-            'inserted' => $inserted,
-            'message' => $message,
-            'time_ms' => $executionMs,
-        ];
+        return ['success' => $status === 'success', 'fetched' => $fetched, 'inserted' => $inserted, 'message' => $message, 'time_ms' => $executionMs];
     }
 }
