@@ -180,58 +180,60 @@ class _ChartScreenState extends State<ChartScreen> {
           ),
         ],
       ),
-      body: _isLoading || _error != null
-          ? StateWidget(isLoading: _isLoading, error: _error, onRetry: _loadData)
-          : SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── 🎓 Eğitim kartı ──
-                  if (_showEducation && _educationData != null)
-                    _buildEducationCard(),
+      body: SafeArea(
+        child: _isLoading || _error != null
+            ? StateWidget(isLoading: _isLoading, error: _error, onRetry: _loadData)
+            : SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── 🎓 Eğitim kartı ──
+                    if (_showEducation && _educationData != null)
+                      _buildEducationCard(),
 
-                  // ── Son değer ──
-                  if (_timeSeries != null) _buildValueHeader(theme),
+                    // ── Son değer ──
+                    if (_timeSeries != null) _buildValueHeader(theme),
 
-                  // ── Periyot ──
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: PeriodSelector(selected: _period, onChanged: _onPeriodChanged),
-                  ),
-
-                  // ── Grafik tipi ──
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: ChartTypeSelector(selected: _chartType, onChanged: _onChartTypeChanged),
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // ── Plotly grafik ──
-                  if (_plotlyConfig != null)
+                    // ── Periyot ──
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: PlotlyChart(plotlyConfig: _plotlyConfig!, height: 350, darkMode: isDark),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: PeriodSelector(selected: _period, onChanged: _onPeriodChanged),
                     ),
 
-                  // ═══ Hafta 4: Teknik Göstergeler ═══
-                  _buildTechIndicatorsToggle(),
-                  if (_showTechPanel) _buildTechPanel(),
+                    // ── Grafik tipi ──
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: ChartTypeSelector(selected: _chartType, onChanged: _onChartTypeChanged),
+                    ),
 
-                  // ── 💡 Bana Açıkla toggle ──
-                  _buildExplainToggle(),
+                    const SizedBox(height: 8),
 
-                  // ── Otomatik yorum ──
-                  if (_showExplain && _explainText != null)
-                    _buildExplainCard(),
+                    // ── Plotly grafik ──
+                    if (_plotlyConfig != null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: PlotlyChart(plotlyConfig: _plotlyConfig!, height: 350, darkMode: isDark),
+                      ),
 
-                  // ── Trend ──
-                  if (_trendResult != null) _buildTrendSection(theme),
+                    // ═══ Hafta 4: Teknik Göstergeler ═══
+                    _buildTechIndicatorsToggle(),
+                    if (_showTechPanel) _buildTechPanel(),
 
-                  const SizedBox(height: 32),
-                ],
+                    // ── 💡 Bana Açıkla toggle ──
+                    _buildExplainToggle(),
+
+                    // ── Otomatik yorum ──
+                    if (_showExplain && _explainText != null)
+                      _buildExplainCard(),
+
+                    // ── Trend ──
+                    if (_trendResult != null) _buildTrendSection(theme),
+
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
-            ),
+      ),
     );
   }
 
@@ -689,34 +691,65 @@ class _ChartScreenState extends State<ChartScreen> {
     );
   }
 
+  // ═══════════════════════════════════════════
+  //  ℹ️ GÖSTERGE BİLGİSİ — DÜZELTILDI
+  //  isScrollControlled + DraggableScrollableSheet
+  // ═══════════════════════════════════════════
+
   void _showIndicatorInfo() {
     if (_timeSeries == null) return;
     final ind = _timeSeries!.indicator;
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF1A1A2E),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(ind.nameTr, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(ind.nameEn, style: TextStyle(color: Colors.grey[500])),
-            const SizedBox(height: 16),
-            _row('EVDS Kodu', ind.evdsCode),
-            _row('Birim', ind.unit),
-            _row('Frekans', ind.frequency),
-            _row('Kaynak', ind.source),
-            _row('Veri sayısı', '${_timeSeries!.data.length}'),
-            _row('Dönem', '${_timeSeries!.periodStart} → ${_timeSeries!.periodEnd}'),
-            const SizedBox(height: 16),
-          ],
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.45,
+        minChildSize: 0.25,
+        maxChildSize: 0.8,
+        expand: false,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Sürükleme göstergesi
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[600],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text(ind.nameTr, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(ind.nameEn, style: TextStyle(color: Colors.grey[500])),
+              const SizedBox(height: 16),
+              _row('EVDS Kodu', ind.evdsCode),
+              _row('Birim', ind.unit),
+              _row('Frekans', ind.frequency),
+              _row('Kaynak', ind.source),
+              _row('Veri sayısı', '${_timeSeries!.data.length}'),
+              _row('Dönem', '${_timeSeries!.periodStart} → ${_timeSeries!.periodEnd}'),
+              if (ind.descriptionTr != null && ind.descriptionTr!.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Divider(color: Color(0xFF2A2A4A)),
+                const SizedBox(height: 8),
+                Text(ind.descriptionTr!,
+                    style: TextStyle(fontSize: 13, color: Colors.grey[400], height: 1.5)),
+              ],
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );

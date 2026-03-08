@@ -5,17 +5,17 @@ import 'chart_screen.dart';
 import '../widgets/common_widgets.dart';
 import 'comparison_screen.dart';
 import 'correlation_matrix_screen.dart';
+import 'country_comparison_screen.dart';
 import 'glossary_screen.dart';
+import 'sustainability_screen.dart';
 import '../models/models.dart';
 import 'search_screen.dart';
 
 /// Ana Dashboard Ekranı
 ///
-/// Favoriler en üstte, ardından kategoriler.
-/// Her kartta sparkline mini grafik gösterilir.
+/// v2: Ülke kıyaslama ve sürdürülebilirlik navigasyonu eklendi.
 ///
-/// Hafta 3: Sözlük navigasyonu eklendi
-/// Hafta 5: Korelasyon matrisi navigasyonu eklendi
+/// Favoriler en üstte, hızlı erişim kartları, ardından kategoriler.
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -39,10 +39,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+    setState(() { _isLoading = true; _error = null; });
 
     try {
       final results = await Future.wait([
@@ -56,10 +53,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
+      setState(() { _error = e.toString(); _isLoading = false; });
     }
   }
 
@@ -72,11 +66,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final all = _allIndicators;
     return _favoriteIds
         .map((id) {
-          try {
-            return all.firstWhere((i) => i.id == id);
-          } catch (_) {
-            return null;
-          }
+          try { return all.firstWhere((i) => i.id == id); }
+          catch (_) { return null; }
         })
         .where((i) => i != null)
         .cast<DashboardIndicator>()
@@ -96,12 +87,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: Row(
           children: [
             Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(
-                color: Color(0xFF4ECDC4),
-                shape: BoxShape.circle,
-              ),
+              width: 8, height: 8,
+              decoration: const BoxDecoration(color: Color(0xFF4ECDC4), shape: BoxShape.circle),
             ),
             const SizedBox(width: 10),
             const Text('Makro Dashboard'),
@@ -111,55 +98,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
           IconButton(
             icon: const Icon(Icons.search, size: 22),
             tooltip: 'Ara',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SearchScreen()),
-            ),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const SearchScreen())),
           ),
-          // ★ Araçlar menüsü
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, size: 22),
             onSelected: (value) {
               switch (value) {
                 case 'compare':
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const ComparisonScreen()));
-                  break;
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ComparisonScreen()));
                 case 'matrix':
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const CorrelationMatrixScreen()));
-                  break;
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CorrelationMatrixScreen()));
+                case 'country':
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CountryComparisonScreen()));
+                case 'sustainability':
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SustainabilityScreen()));
                 case 'glossary':
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const GlossaryScreen()));
-                  break;
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const GlossaryScreen()));
               }
             },
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                value: 'compare',
-                child: Row(children: [
-                  Icon(Icons.compare_arrows, size: 20, color: Color(0xFF4ECDC4)),
-                  SizedBox(width: 10),
-                  Text('Karşılaştır'),
-                ]),
-              ),
-              const PopupMenuItem(
-                value: 'matrix',
-                child: Row(children: [
-                  Icon(Icons.grid_on, size: 20, color: Color(0xFF45B7D1)),
-                  SizedBox(width: 10),
-                  Text('Korelasyon Matrisi'),
-                ]),
-              ),
-              const PopupMenuItem(
-                value: 'glossary',
-                child: Row(children: [
-                  Icon(Icons.menu_book, size: 20, color: Color(0xFFFFA726)),
-                  SizedBox(width: 10),
-                  Text('Ekonomi Sözlüğü'),
-                ]),
-              ),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'compare', child: Row(children: [
+                Icon(Icons.compare_arrows, size: 20, color: Color(0xFF4ECDC4)),
+                SizedBox(width: 10), Text('Karşılaştır'),
+              ])),
+              PopupMenuItem(value: 'matrix', child: Row(children: [
+                Icon(Icons.grid_on, size: 20, color: Color(0xFF45B7D1)),
+                SizedBox(width: 10), Text('Korelasyon Matrisi'),
+              ])),
+              PopupMenuDivider(),
+              PopupMenuItem(value: 'country', child: Row(children: [
+                Icon(Icons.public, size: 20, color: Color(0xFF85C1E9)),
+                SizedBox(width: 10), Text('Ülke Kıyaslama'),
+              ])),
+              PopupMenuItem(value: 'sustainability', child: Row(children: [
+                Icon(Icons.eco, size: 20, color: Color(0xFF66BB6A)),
+                SizedBox(width: 10), Text('Yeşil Göstergeler'),
+              ])),
+              PopupMenuDivider(),
+              PopupMenuItem(value: 'glossary', child: Row(children: [
+                Icon(Icons.menu_book, size: 20, color: Color(0xFFFFA726)),
+                SizedBox(width: 10), Text('Ekonomi Sözlüğü'),
+              ])),
             ],
           ),
         ],
@@ -170,11 +150,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildBody() {
     if (_isLoading || _error != null) {
-      return StateWidget(
-        isLoading: _isLoading,
-        error: _error,
-        onRetry: _loadData,
-      );
+      return StateWidget(isLoading: _isLoading, error: _error, onRetry: _loadData);
     }
 
     if (_data == null || _data!.isEmpty) {
@@ -187,10 +163,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 32),
         children: [
-          // ★ Hızlı erişim araç kartları
-          _buildQuickActions(),
+          // ★ Hızlı erişim kartları — 2 satır
+          _buildQuickActionsRow1(),
+          _buildQuickActionsRow2(),
 
-          // Favoriler bölümü
+          // Favoriler
           if (_favoriteIndicators.isNotEmpty) ...[
             _buildFavoritesSection(),
             const Padding(
@@ -199,7 +176,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ],
 
-          // Favori ekleme ipucu
           if (_favoriteIndicators.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -208,21 +184,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF4ECDC4).withOpacity(0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: const Color(0xFF4ECDC4).withOpacity(0.2),
-                  ),
+                  border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.2)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.star_border,
-                        size: 18, color: Colors.grey[400]),
+                    Icon(Icons.star_border, size: 18, color: Colors.grey[400]),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        'Bir göstergeye uzun basarak favorilere ekleyebilirsiniz',
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey[400]),
-                      ),
+                      child: Text('Bir göstergeye uzun basarak favorilere ekleyebilirsiniz',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[400])),
                     ),
                   ],
                 ),
@@ -231,16 +201,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           // Kategoriler
           ..._data!.entries.map((entry) {
-            final cat = entry.value;
-            return _buildCategorySection(entry.key, cat);
+            return _buildCategorySection(entry.key, entry.value);
           }),
         ],
       ),
     );
   }
 
-  /// ★ Hızlı erişim kartları — yeni özellikler
-  Widget _buildQuickActions() {
+  /// Satır 1: Analiz araçları
+  Widget _buildQuickActionsRow1() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Row(
@@ -273,6 +242,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// Satır 2: Uluslararası özellikler
+  Widget _buildQuickActionsRow2() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Row(
+        children: [
+          _quickActionCard(
+            icon: Icons.public,
+            label: 'Ülke\nKıyaslama',
+            color: const Color(0xFF85C1E9),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CountryComparisonScreen())),
+          ),
+          const SizedBox(width: 8),
+          _quickActionCard(
+            icon: Icons.eco,
+            label: 'Yeşil\nGöstergeler',
+            color: const Color(0xFF66BB6A),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const SustainabilityScreen())),
+          ),
+          const SizedBox(width: 8),
+          // Boşluk veya gelecek özellik
+          Expanded(child: Container()),
+        ],
+      ),
+    );
+  }
+
   Widget _quickActionCard({
     required IconData icon,
     required String label,
@@ -296,11 +294,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Icon(icon, size: 22, color: color),
                 const SizedBox(height: 6),
-                Text(
-                  label,
-                  style: TextStyle(fontSize: 10, color: Colors.grey[400]),
-                  textAlign: TextAlign.center,
-                ),
+                Text(label,
+                    style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                    textAlign: TextAlign.center),
               ],
             ),
           ),
@@ -319,17 +315,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               const Icon(Icons.star, size: 18, color: Color(0xFFFFD700)),
               const SizedBox(width: 8),
-              Text(
-                'Favorilerim',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
+              Text('Favorilerim',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
               const Spacer(),
-              Text(
-                '${_favoriteIndicators.length}',
-                style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-              ),
+              Text('${_favoriteIndicators.length}',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[500])),
             ],
           ),
         ),
@@ -346,8 +336,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: IndicatorCard(
-                    indicator: ind,
-                    isFavorite: true,
+                    indicator: ind, isFavorite: true,
                     onTap: () => _openChart(ind.id, ind.name),
                     onLongPress: () => _toggleFavorite(ind.id),
                   ),
@@ -364,11 +353,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CategoryHeader(
-          title: cat.category,
-          color: cat.color,
-          icon: cat.icon,
-        ),
+        CategoryHeader(title: cat.category, color: cat.color, icon: cat.icon),
         SizedBox(
           height: 140,
           child: ListView.builder(
@@ -397,11 +382,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _openChart(int id, String name) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ChartScreen(indicatorId: id, indicatorName: name),
-      ),
-    );
+    Navigator.push(context,
+        MaterialPageRoute(builder: (_) => ChartScreen(indicatorId: id, indicatorName: name)));
   }
 }

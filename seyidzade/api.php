@@ -29,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once __DIR__ . '/config/Database.php';
 require_once __DIR__ . '/services/EvdsService.php';
+require_once __DIR__ . '/services/WorldBankService.php';
 
 // =========================================
 // ROUTER
@@ -50,6 +51,13 @@ try {
         'analyze' => proxyToAnalysis(),
         'fetch' => triggerFetch(),
         'stats' => getSystemStats($db),
+        'countries'       => getCountries(),
+    'intl_indicators' => getIntlIndicators(),
+    'intl_compare'    => getIntlComparison(),
+    'intl_latest'     => getIntlLatest(),
+    'sustainability'  => getSustainabilityDashboard(),
+    'intl_fetch'      => triggerIntlFetch(),
+    'intl_fetch_all'  => triggerIntlFetchAll(),
         default => [
             'error' => 'Geçersiz action',
             'available_actions' => [
@@ -301,9 +309,10 @@ function getLatestValues(PDO $db): array
 {
     $stmt = $db->query("
         SELECT 
-            i.id, i.name_tr, i.name_en, i.unit, i.evds_code, i.last_value, i.last_value_date,
-            c.code as category_code, c.name_tr as category_name_tr, c.color as category_color,
-            c.icon as category_icon
+            i.id, i.name_tr, i.name_en, i.unit, i.evds_code, 
+            i.last_value, i.last_value_date,
+            c.code as category_code, c.name_tr as category_name_tr, 
+            c.color as category_color, c.icon as category_icon
         FROM indicators i
         JOIN categories c ON c.id = i.category_id
         WHERE i.is_active = 1 AND i.last_value IS NOT NULL
@@ -312,7 +321,14 @@ function getLatestValues(PDO $db): array
 
     $data = $stmt->fetchAll();
 
-    // Kategoriye göre grupla
+    // Her gösterge için sparkline + change hesapla
+    $sparkStmt = $db->prepare("
+        SELECT value FROM data_points 
+        WHERE indicator_id = ? 
+        ORDER BY date DESC 
+        LIMIT 30
+    ");
+
     $grouped = [];
     foreach ($data as $row) {
         $catCode = $row['category_code'];
@@ -324,22 +340,38 @@ function getLatestValues(PDO $db): array
                 'indicators' => [],
             ];
         }
+
+        // Sparkline: son 30 değer (eski→yeni sırada)
+        $sparkStmt->execute([$row['id']]);
+        $sparkValues = $sparkStmt->fetchAll(PDO::FETCH_COLUMN);
+        $sparkValues = array_reverse($sparkValues); // eski→yeni
+
+        // Değişim yüzdesi: son iki değer arasında
+        $changePct = null;
+        if (count($sparkValues) >= 2) {
+            $last = (float) end($sparkValues);
+            $prev = (float) $sparkValues[count($sparkValues) - 2];
+            if ($prev != 0) {
+                $changePct = round(($last - $prev) / abs($prev) * 100, 2);
+            }
+        }
+
         $grouped[$catCode]['indicators'][] = [
             'id' => $row['id'],
             'name' => $row['name_tr'],
             'value' => $row['last_value'],
             'date' => $row['last_value_date'],
             'unit' => $row['unit'],
+            'sparkline' => $sparkValues,
+            'change_pct' => $changePct,
         ];
     }
 
     return ['success' => true, 'data' => $grouped];
 }
 
-/**
- * GET /api.php?action=search&q=enflasyon
- * Gösterge adında arama yapar
- */
+
+
 function searchIndicators(PDO $db): array
 {
     $query = $_GET['q'] ?? '';
@@ -538,4 +570,230 @@ function getSystemStats(PDO $db): array
     ];
 
     return ['success' => true, 'data' => $stats];
+}
+
+function getCountries(): array
+{
+    $wb = new WorldBankService();
+    $countries = $wb->getCountries();
+
+    return ['success' => true, 'data' => $countries];
+}
+
+/**
+ * GET ?action=intl_indicators
+ * GET ?action=intl_indicators&category=sustainability
+ * Uluslararası göstergeleri listeler
+ */
+function getIntlIndicators(): array
+{
+    $wb = new WorldBankService();
+    $categoryCode = $_GET['category'] ?? null;
+    $indicators = $wb->getIndicators($categoryCode);
+
+    return ['success' => true, 'data' => $indicators];
+}
+
+/**
+ * GET ?action=intl_compare&indicator=1&countries=TUR,USA,DEU&start=2010&end=2024
+ * Ülkeler arası kıyaslama verisi
+ */
+function getIntlComparison(): array
+{
+    $indicatorId = isset($_GET['indicator']) ? (int) $_GET['indicator'] : 0;
+    if (!$indicatorId) return ['error' => 'indicator parametresi gerekli'];
+
+    $countriesParam = $_GET['countries'] ?? 'TUR,USA,DEU';
+    $countryCodes = array_filter(array_map('trim', explode(',', $countriesParam)));
+
+    if (empty($countryCodes)) return ['error' => 'countries parametresi gerekli'];
+    if (count($countryCodes) > 10) return ['error' => 'En fazla 10 ülke karşılaştırılabilir'];
+
+    $startYear = isset($_GET['start']) ? (int) $_GET['start'] : 2000;
+    $endYear = isset($_GET['end']) ? (int) $_GET['end'] : (int) date('Y');
+
+    $wb = new WorldBankService();
+    return $wb->getComparisonData($indicatorId, $countryCodes, $startYear, $endYear);
+}
+
+/**
+ * GET ?action=intl_latest&countries=TUR,USA,DEU
+ * Her ülkenin her gösterge için son değerini döner
+ */
+function getIntlLatest(): array
+{
+    $db = Database::getConnection();
+
+    $countriesParam = $_GET['countries'] ?? '';
+    $countryFilter = '';
+    $params = [];
+
+    if ($countriesParam) {
+        $codes = array_filter(array_map('trim', explode(',', $countriesParam)));
+        $placeholders = str_repeat('?,', count($codes) - 1) . '?';
+        $countryFilter = "AND c.iso_code IN ($placeholders)";
+        $params = $codes;
+    }
+
+    $stmt = $db->prepare("
+        SELECT 
+            ii.id as indicator_id,
+            ii.name_tr as indicator_name,
+            ii.unit,
+            ii.source_type,
+            c.iso_code,
+            c.name_tr as country_name,
+            c.flag_emoji,
+            idp.value,
+            idp.date,
+            cat.code as category_code,
+            cat.name_tr as category_name
+        FROM international_data_points idp
+        JOIN international_indicators ii ON ii.id = idp.intl_indicator_id
+        JOIN countries c ON c.id = idp.country_id
+        JOIN categories cat ON cat.id = ii.category_id
+        WHERE ii.is_active = 1
+          AND c.is_active = 1
+          $countryFilter
+          AND idp.date = (
+              SELECT MAX(idp2.date)
+              FROM international_data_points idp2
+              WHERE idp2.intl_indicator_id = idp.intl_indicator_id
+                AND idp2.country_id = idp.country_id
+          )
+        ORDER BY cat.sort_order, ii.id, c.sort_order
+    ");
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+
+    // Göstergeye göre grupla
+    $grouped = [];
+    foreach ($rows as $row) {
+        $indId = $row['indicator_id'];
+        if (!isset($grouped[$indId])) {
+            $grouped[$indId] = [
+                'indicator' => [
+                    'id' => $indId,
+                    'name_tr' => $row['indicator_name'],
+                    'unit' => $row['unit'],
+                    'category' => $row['category_name'],
+                    'category_code' => $row['category_code'],
+                ],
+                'countries' => [],
+            ];
+        }
+        $grouped[$indId]['countries'][] = [
+            'iso_code' => $row['iso_code'],
+            'name_tr' => $row['country_name'],
+            'flag_emoji' => $row['flag_emoji'],
+            'value' => $row['value'],
+            'date' => $row['date'],
+        ];
+    }
+
+    return ['success' => true, 'data' => array_values($grouped)];
+}
+
+/**
+ * GET ?action=sustainability&countries=TUR,USA,DEU
+ * Sürdürülebilirlik dashboard özeti — Türkiye odaklı, kıyaslamalı
+ */
+function getSustainabilityDashboard(): array
+{
+    $db = Database::getConnection();
+
+    $countriesParam = $_GET['countries'] ?? 'TUR,USA,DEU,CHN,BRA';
+    $codes = array_filter(array_map('trim', explode(',', $countriesParam)));
+    $placeholders = str_repeat('?,', count($codes) - 1) . '?';
+
+    // Sürdürülebilirlik kategorisindeki göstergeler
+    $stmt = $db->prepare("
+        SELECT 
+            ii.id, ii.name_tr, ii.unit, ii.source_code,
+            c.iso_code, c.name_tr as country_name, c.flag_emoji,
+            idp.value, idp.date
+        FROM international_data_points idp
+        JOIN international_indicators ii ON ii.id = idp.intl_indicator_id
+        JOIN countries c ON c.id = idp.country_id
+        JOIN categories cat ON cat.id = ii.category_id
+        WHERE cat.code = 'sustainability'
+          AND ii.is_active = 1
+          AND c.iso_code IN ($placeholders)
+          AND idp.date = (
+              SELECT MAX(idp2.date)
+              FROM international_data_points idp2
+              WHERE idp2.intl_indicator_id = idp.intl_indicator_id
+                AND idp2.country_id = idp.country_id
+          )
+        ORDER BY ii.id, c.sort_order
+    ");
+    $stmt->execute($codes);
+    $rows = $stmt->fetchAll();
+
+    // Gösterge bazlı grupla
+    $indicators = [];
+    foreach ($rows as $row) {
+        $indId = $row['id'];
+        if (!isset($indicators[$indId])) {
+            $indicators[$indId] = [
+                'name_tr' => $row['name_tr'],
+                'unit' => $row['unit'],
+                'countries' => [],
+            ];
+        }
+        $indicators[$indId]['countries'][$row['iso_code']] = [
+            'name' => $row['country_name'],
+            'flag' => $row['flag_emoji'],
+            'value' => $row['value'],
+            'date' => $row['date'],
+        ];
+    }
+
+    // Türkiye'nin pozisyonu her göstergede
+    $turkeyRankings = [];
+    foreach ($indicators as $indId => $ind) {
+        $values = [];
+        foreach ($ind['countries'] as $iso => $data) {
+            $values[$iso] = (float) $data['value'];
+        }
+        arsort($values);
+        $rank = array_search('TUR', array_keys($values));
+        $turkeyRankings[$indId] = [
+            'rank' => $rank !== false ? $rank + 1 : null,
+            'total' => count($values),
+            'value' => $values['TUR'] ?? null,
+        ];
+    }
+
+    return [
+        'success' => true,
+        'data' => [
+            'indicators' => array_values($indicators),
+            'turkey_rankings' => $turkeyRankings,
+            'countries_compared' => $codes,
+        ],
+    ];
+}
+
+/**
+ * POST ?action=intl_fetch&indicator=1
+ * Manuel uluslararası veri çekme
+ */
+function triggerIntlFetch(): array
+{
+    $id = isset($_GET['indicator']) ? (int) $_GET['indicator'] : 0;
+    if (!$id) return ['error' => 'indicator parametresi gerekli'];
+
+    $wb = new WorldBankService();
+    return $wb->fetchIndicatorData($id);
+}
+
+/**
+ * POST ?action=intl_fetch_all
+ * Tüm uluslararası göstergeleri güncelle
+ */
+function triggerIntlFetchAll(): array
+{
+    $wb = new WorldBankService();
+    return ['success' => true, 'results' => $wb->fetchAllActive()];
 }

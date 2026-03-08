@@ -5,17 +5,19 @@ TCMB EVDS API üzerinden Türkiye ekonomik verilerini çeken, analiz eden ve int
 ## Mimari
 
 ```
-┌─────────────────────┐     ┌──────────────┐     ┌─────────────┐
-│  Flutter App         │────▶│  PHP Backend  │────▶│    MySQL     │
-│  ┌───────────────┐  │     │  (REST API)   │     │  (Veri       │
-│  │ ChartConfig   │  │     └──────┬───────┘     │   Deposu)    │
-│  │ Builder (Dart)│  │            │              └─────────────┘
-│  └───────────────┘  │            │ HTTP (opsiyonel)
-│  ┌───────────────┐  │   ┌────────▼────────┐
-│  │ Plotly.js     │  │   │ Python Servis    │
-│  │ (WebView)     │  │   │ (FastAPI +       │
-│  └───────────────┘  │   │  Pandas/NumPy)   │
-└─────────────────────┘   └─────────────────┘
+┌─────────────────────┐     ┌──────────────────┐     ┌─────────────┐
+│  Flutter App         │────▶│  PHP Backend      │────▶│    MySQL     │
+│  ┌───────────────┐  │     │  ┌────────────┐  │     │ ┌─────────┐ │
+│  │ Yerel (EVDS)  │  │     │  │EvdsService │──┼────▶│ │data_pts │ │
+│  │ + Uluslararası│  │     │  │WorldBank   │──┼────▶│ │intl_data│ │
+│  └───────────────┘  │     │  │  Service   │  │     │ │countries│ │
+│  ┌───────────────┐  │     │  └────────────┘  │     │ └─────────┘ │
+│  │ Country       │  │     └──────┬───────────┘     └─────────────┘
+│  │ Comparison    │  │            │
+│  │ Sustainability│  │   ┌────────▼────────┐
+│  └───────────────┘  │   │  Dünya Bankası   │
+└─────────────────────┘   │  API (external)  │
+                          └─────────────────┘
 ```
 
 | Katman | Teknoloji | Görev |
@@ -25,6 +27,13 @@ TCMB EVDS API üzerinden Türkiye ekonomik verilerini çeken, analiz eden ve int
 | Backend API | PHP 8.2 (PDO) | REST API, veri yönetimi, EVDS entegrasyonu |
 | Analiz | Python 3.12 (FastAPI + Pandas) | Korelasyon, trend, istatistik **(opsiyonel)** |
 | Veritabanı | MySQL 8.0 | Zaman serisi depolama |
+
+
+Not
+
+Dünya Bankası API API key gerektirmez
+Veriler genelde 1-2 yıl gecikmelidir (2024'te en son 2022-2023 verisi olabilir)
+Rate limit cömerttir ama yine de istekler arası 0.5s bekleme eklenmiştir
 
 ### Veri Akışı
 
