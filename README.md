@@ -1,69 +1,38 @@
 # Makroekonomik Dashboard
 
-TCMB EVDS API üzerinden Türkiye ekonomik verilerini çeken, analiz eden ve interaktif grafiklerle sunan full-stack uygulama.
+TCMB EVDS API üzerinden Türkiye ekonomik verilerini analiz eden ve interaktif grafiklerle sunan full-stack uygulama. Akademik ekonometrik analiz modülü ile tez çalışmalarını destekler.
 
 ## Mimari
 
 ```
 ┌─────────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Flutter App         │────▶│  PHP Backend      │────▶│    MySQL     │
-│  ┌───────────────┐  │     │  ┌────────────┐  │     │ ┌─────────┐ │
-│  │ Yerel (EVDS)  │  │     │  │EvdsService │──┼────▶│ │data_pts │ │
-│  │ + Uluslararası│  │     │  │WorldBank   │──┼────▶│ │intl_data│ │
-│  └───────────────┘  │     │  │  Service   │  │     │ │countries│ │
-│  ┌───────────────┐  │     │  └────────────┘  │     │ └─────────┘ │
-│  │ Country       │  │     └──────┬───────────┘     └─────────────┘
-│  │ Comparison    │  │            │
-│  │ Sustainability│  │   ┌────────▼────────┐
-│  └───────────────┘  │   │  Dünya Bankası   │
-└─────────────────────┘   │  API (external)  │
-                          └─────────────────┘
+│  Flutter App         │────▶│  PHP Backend      │────▶│   MySQL      │
+│                      │     │  ┌────────────┐  │     │  data_points │
+│  Dashboard           │     │  │EvdsService │  │     │  intl_data   │
+│  Grafik & Analiz     │     │  │WorldBank   │  │     │  countries   │
+│  Ülke Kıyaslama      │     │  │  Service   │  │     └─────────────┘
+│  Ekonometri          │     │  └─────┬──────┘  │
+│  Sürdürülebilirlik   │     │        │ proxy   │
+│  Sözlük              │     └────────┼─────────┘
+└─────────────────────┘              │
+                              ┌──────▼──────────┐
+                              │  Python Servis   │
+                              │  FastAPI         │
+                              │  Ekonometri      │
+                              │  İstatistik      │
+                              └─────────────────┘
 ```
 
 | Katman | Teknoloji | Görev |
 |--------|-----------|-------|
-| Frontend | Flutter + Plotly.js (WebView) | İnteraktif grafikler, dashboard |
-| Grafik Config | Dart (ChartConfigBuilder) | Plotly.js JSON config üretimi (yerel) |
-| Backend API | PHP 8.2 (PDO) | REST API, veri yönetimi, EVDS entegrasyonu |
-| Analiz | Python 3.12 (FastAPI + Pandas) | Korelasyon, trend, istatistik **(opsiyonel)** |
+| Frontend | Flutter + Plotly.js (WebView) | Dashboard, grafikler, ekonometri UI |
+| Backend | PHP 8.2 (PDO) | REST API, EVDS/WorldBank entegrasyonu |
+| Analiz | Python 3.12 (FastAPI) | Ekonometrik analiz, istatistik |
 | Veritabanı | MySQL 8.0 | Zaman serisi depolama |
-
-
-Not
-
-Dünya Bankası API API key gerektirmez
-Veriler genelde 1-2 yıl gecikmelidir (2024'te en son 2022-2023 verisi olabilir)
-Rate limit cömerttir ama yine de istekler arası 0.5s bekleme eklenmiştir
-
-### Veri Akışı
-
-**Grafik gösterimi:**
-```
-Kullanıcı karta tıklar
-  → Flutter, PHP API'den zaman serisi verisini çeker
-  → ChartConfigBuilder (Dart) Plotly JSON config üretir
-  → WebView'da Plotly.js grafiği render eder
-```
-
-**İstatistiksel analiz (Python opsiyonel):**
-```
-Kullanıcı "Analiz Et" tıklar
-  → PHP API, Python servisine proxy yapar
-  → Python korelasyon/trend hesaplar
-  → Sonuç Flutter'a döner
-  → Python çalışmıyorsa grafik yine gösterilir, sadece analiz kartı eksik kalır
-```
-
-### Cron (otomatik veri güncelleme)
-
-```bash
-# Her gün 09:00'da tüm göstergeleri güncelle
-0 9 * * * /usr/bin/php /path/to/cron/fetch_data.php --verbose >> /var/log/macro-dashboard.log 2>&1
-```
 
 ## API Endpoints
 
-### PHP Backend
+### PHP Backend (`api.php`)
 
 | Method | Endpoint | Açıklama |
 |--------|----------|----------|
@@ -73,12 +42,81 @@ Kullanıcı "Analiz Et" tıklar
 | GET | `?action=compare&ids=1,2&period=5y` | Çoklu gösterge karşılaştırma |
 | GET | `?action=latest` | Dashboard özet (son değerler) |
 | GET | `?action=search&q=enflasyon` | Gösterge arama |
-| POST | `?action=analyze` | Python analiz proxy |
-| GET | `?action=stats` | Sistem istatistikleri |
+| GET | `?action=countries` | Ülke listesi |
+| GET | `?action=intl_compare&indicator=1&countries=TUR,USA` | Ülke kıyaslama |
+| GET | `?action=sustainability&countries=TUR,USA,DEU` | Yeşil göstergeler |
+| POST | `?action=analyze` | İstatistiksel analiz (Python proxy) |
+| POST | `?action=econometrics` | Ekonometrik analiz (Python proxy) |
 
-### Python Servisi
+### Python Servisi (`/econometrics`)
 
 | Method | Endpoint | Açıklama |
 |--------|----------|----------|
-| POST | `/analyze` | Korelasyon, trend, istatistik analizi |
-| GET | `/health` | Servis sağlık kontrolü |
+| POST | `/econometrics` | Ekonometrik analiz |
+| POST | `/analyze` | Korelasyon, trend, istatistik |
+| GET | `/econometrics/methods` | Desteklenen yöntemler |
+| GET | `/health` | Servis durumu |
+
+## Ekonometrik Analiz Modülü
+
+Tez: *"Sürdürülebilir Kalkınma Sürecinde Yeşil Ekonomiye Geçişin Rolü: AB ve Türkiye"*
+
+### Desteklenen Yöntemler
+
+| Yöntem | Açıklama | Kütüphane |
+|--------|----------|-----------|
+| `unit_root` | ADF, PP, KPSS birim kök testleri | statsmodels |
+| `cointegration` | Engle-Granger, Johansen eşbütünleşme | statsmodels |
+| `granger` | Granger nedensellik testi | statsmodels |
+| `var_model` | VAR + IRF + Varyans Ayrıştırma | statsmodels |
+| `ardl` | Pesaran ARDL sınır testi | statsmodels |
+| `garch` | ARCH/GARCH volatilite modeli | arch |
+| `ols` | OLS regresyon + diagnostik testler | statsmodels |
+| `descriptive` | Tanımlayıcı istatistik (tez tablosu) | scipy |
+| `correlation` | Pearson, Spearman, kısmi korelasyon | pingouin |
+| `full_analysis` | Tam tez paketi (hepsi bir arada) | — |
+
+### Kullanım Örneği
+
+```json
+POST /econometrics
+{
+  "method": "unit_root",
+  "series_data": [{
+    "indicator_id": 1,
+    "name": "TÜFE",
+    "unit": "%",
+    "data": [{"date": "2024-01-01", "value": 64.77}, ...]
+  }],
+  "params": {"regression": "ct"}
+}
+```
+
+### Tez Analiz Akışı
+
+```
+1. descriptive    → Tablo 5.1: Tanımlayıcı İstatistikler
+2. unit_root      → Tablo 5.2: ADF ve KPSS Birim Kök Sonuçları
+3. cointegration  → Tablo 5.3: Johansen Eşbütünleşme Sonuçları
+4. granger        → Tablo 5.4: Granger Nedensellik Sonuçları
+5. var_model      → Şekil 5.1: Etki-Tepki Fonksiyonları (IRF)
+6. garch          → Tablo 5.5: GARCH Model Sonuçları
+7. ols            → Tablo 5.6: Regresyon Analizi Sonuçları
+```
+
+## Veri Kaynakları
+
+| Kaynak | Veri | Frekans |
+|--------|------|---------|
+| TCMB EVDS | Enflasyon, faiz, döviz, üretim, istihdam | Günlük/Aylık |
+| Dünya Bankası | GDP, CO₂, yenilenebilir enerji, orman alanı | Yıllık |
+
+## Cron (Otomatik Güncelleme)
+
+```bash
+# Günlük TCMB verileri (her gün 09:00)
+0 9 * * * php fetch_data.php --verbose
+
+# Haftalık uluslararası veriler (her Pazartesi 10:00)
+0 10 * * 1 php fetch_international.php --verbose
+```

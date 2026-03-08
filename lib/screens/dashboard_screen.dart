@@ -10,6 +10,7 @@ import 'glossary_screen.dart';
 import 'sustainability_screen.dart';
 import '../models/models.dart';
 import 'search_screen.dart';
+import 'econometrics_screen.dart';
 
 /// Ana Dashboard Ekranı
 ///
@@ -39,7 +40,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadData() async {
-    setState(() { _isLoading = true; _error = null; });
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
 
     try {
       final results = await Future.wait([
@@ -53,7 +57,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() { _error = e.toString(); _isLoading = false; });
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
     }
   }
 
@@ -66,8 +73,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final all = _allIndicators;
     return _favoriteIds
         .map((id) {
-          try { return all.firstWhere((i) => i.id == id); }
-          catch (_) { return null; }
+          try {
+            return all.firstWhere((i) => i.id == id);
+          } catch (_) {
+            return null;
+          }
         })
         .where((i) => i != null)
         .cast<DashboardIndicator>()
@@ -87,8 +97,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: Row(
           children: [
             Container(
-              width: 8, height: 8,
-              decoration: const BoxDecoration(color: Color(0xFF4ECDC4), shape: BoxShape.circle),
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                  color: Color(0xFF4ECDC4), shape: BoxShape.circle),
             ),
             const SizedBox(width: 10),
             const Text('Makro Dashboard'),
@@ -106,40 +118,84 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onSelected: (value) {
               switch (value) {
                 case 'compare':
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ComparisonScreen()));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const ComparisonScreen()));
                 case 'matrix':
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CorrelationMatrixScreen()));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const CorrelationMatrixScreen()));
                 case 'country':
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CountryComparisonScreen()));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const CountryComparisonScreen()));
                 case 'sustainability':
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SustainabilityScreen()));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const SustainabilityScreen()));
                 case 'glossary':
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const GlossaryScreen()));
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const GlossaryScreen()));
+                case 'econometrics':
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const EconometricsScreen()));
               }
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'compare', child: Row(children: [
-                Icon(Icons.compare_arrows, size: 20, color: Color(0xFF4ECDC4)),
-                SizedBox(width: 10), Text('Karşılaştır'),
-              ])),
-              PopupMenuItem(value: 'matrix', child: Row(children: [
-                Icon(Icons.grid_on, size: 20, color: Color(0xFF45B7D1)),
-                SizedBox(width: 10), Text('Korelasyon Matrisi'),
-              ])),
+              PopupMenuItem(
+                  value: 'compare',
+                  child: Row(children: [
+                    Icon(Icons.compare_arrows,
+                        size: 20, color: Color(0xFF4ECDC4)),
+                    SizedBox(width: 10),
+                    Text('Karşılaştır'),
+                  ])),
+              PopupMenuItem(
+                  value: 'matrix',
+                  child: Row(children: [
+                    Icon(Icons.grid_on, size: 20, color: Color(0xFF45B7D1)),
+                    SizedBox(width: 10),
+                    Text('Korelasyon Matrisi'),
+                  ])),
               PopupMenuDivider(),
-              PopupMenuItem(value: 'country', child: Row(children: [
-                Icon(Icons.public, size: 20, color: Color(0xFF85C1E9)),
-                SizedBox(width: 10), Text('Ülke Kıyaslama'),
-              ])),
-              PopupMenuItem(value: 'sustainability', child: Row(children: [
-                Icon(Icons.eco, size: 20, color: Color(0xFF66BB6A)),
-                SizedBox(width: 10), Text('Yeşil Göstergeler'),
-              ])),
+              PopupMenuItem(
+                  value: 'country',
+                  child: Row(children: [
+                    Icon(Icons.public, size: 20, color: Color(0xFF85C1E9)),
+                    SizedBox(width: 10),
+                    Text('Ülke Kıyaslama'),
+                  ])),
+              PopupMenuItem(
+                  value: 'sustainability',
+                  child: Row(children: [
+                    Icon(Icons.eco, size: 20, color: Color(0xFF66BB6A)),
+                    SizedBox(width: 10),
+                    Text('Yeşil Göstergeler'),
+                  ])),
               PopupMenuDivider(),
-              PopupMenuItem(value: 'glossary', child: Row(children: [
-                Icon(Icons.menu_book, size: 20, color: Color(0xFFFFA726)),
-                SizedBox(width: 10), Text('Ekonomi Sözlüğü'),
-              ])),
+              PopupMenuItem(
+                  value: 'glossary',
+                  child: Row(children: [
+                    Icon(Icons.menu_book, size: 20, color: Color(0xFFFFA726)),
+                    SizedBox(width: 10),
+                    Text('Ekonomi Sözlüğü'),
+                  ])),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                  value: 'econometrics',
+                  child: Row(children: [
+                    Icon(Icons.science, size: 20, color: Color(0xFF9C27B0)),
+                    SizedBox(width: 10),
+                    Text('Ekonometrik Analiz'),
+                  ])),
             ],
           ),
         ],
@@ -150,7 +206,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildBody() {
     if (_isLoading || _error != null) {
-      return StateWidget(isLoading: _isLoading, error: _error, onRetry: _loadData);
+      return StateWidget(
+          isLoading: _isLoading, error: _error, onRetry: _loadData);
     }
 
     if (_data == null || _data!.isEmpty) {
@@ -184,15 +241,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF4ECDC4).withOpacity(0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.2)),
+                  border: Border.all(
+                      color: const Color(0xFF4ECDC4).withOpacity(0.2)),
                 ),
                 child: Row(
                   children: [
                     Icon(Icons.star_border, size: 18, color: Colors.grey[400]),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text('Bir göstergeye uzun basarak favorilere ekleyebilirsiniz',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                      child: Text(
+                          'Bir göstergeye uzun basarak favorilere ekleyebilirsiniz',
+                          style:
+                              TextStyle(fontSize: 12, color: Colors.grey[400])),
                     ),
                   ],
                 ),
@@ -218,8 +278,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icons.grid_on,
             label: 'Korelasyon\nMatrisi',
             color: const Color(0xFF45B7D1),
-            onTap: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const CorrelationMatrixScreen())),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const CorrelationMatrixScreen())),
           ),
           const SizedBox(width: 8),
           _quickActionCard(
@@ -237,6 +299,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () => Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const GlossaryScreen())),
           ),
+          _quickActionCard(
+            icon: Icons.science,
+            label: 'Ekonometrik\nAnaliz',
+            color: const Color(0xFF9C27B0),
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const EconometricsScreen())),
+          ),
         ],
       ),
     );
@@ -252,16 +321,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icons.public,
             label: 'Ülke\nKıyaslama',
             color: const Color(0xFF85C1E9),
-            onTap: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const CountryComparisonScreen())),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const CountryComparisonScreen())),
           ),
           const SizedBox(width: 8),
           _quickActionCard(
             icon: Icons.eco,
             label: 'Yeşil\nGöstergeler',
             color: const Color(0xFF66BB6A),
-            onTap: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const SustainabilityScreen())),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const SustainabilityScreen())),
           ),
           const SizedBox(width: 8),
           // Boşluk veya gelecek özellik
@@ -316,7 +389,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const Icon(Icons.star, size: 18, color: Color(0xFFFFD700)),
               const SizedBox(width: 8),
               Text('Favorilerim',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w600)),
               const Spacer(),
               Text('${_favoriteIndicators.length}',
                   style: TextStyle(fontSize: 13, color: Colors.grey[500])),
@@ -336,7 +412,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: IndicatorCard(
-                    indicator: ind, isFavorite: true,
+                    indicator: ind,
+                    isFavorite: true,
                     onTap: () => _openChart(ind.id, ind.name),
                     onLongPress: () => _toggleFavorite(ind.id),
                   ),
@@ -382,7 +459,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _openChart(int id, String name) {
-    Navigator.push(context,
-        MaterialPageRoute(builder: (_) => ChartScreen(indicatorId: id, indicatorName: name)));
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => ChartScreen(indicatorId: id, indicatorName: name)));
   }
 }
