@@ -316,11 +316,17 @@ class EvdsService
                 $dateStr = $item['Tarih'] ?? null;
 
                 // JSON key'i tahmin etmek yerine Tarih ve UNIXTIME harici ilk geçerli değeri al
-                $valueStr = null;
+               $valueStr = null;
                 foreach ($item as $key => $val) {
-                    if ($key !== 'Tarih' && $key !== 'UNIXTIME' && $val !== null && $val !== '') {
-                        $valueStr = $val;
-                        break;
+                    if ($key === 'Tarih' || $key === 'UNIXTIME' || $key === 'YEARWEEK') {
+                        continue;
+                    }
+                    if ($val !== null && $val !== '') {
+                        $tempVal = str_replace(',', '.', $val);
+                        if (is_numeric($tempVal)) {
+                            $valueStr = $val;
+                            break; // Sayısal değeri bulduk, döngüden çık
+                        }
                     }
                 }
 

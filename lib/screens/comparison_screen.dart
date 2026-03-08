@@ -46,8 +46,9 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
   Future<void> _loadIndicators() async {
     try {
       final indicators = await _api.getIndicators();
-      // Sadece son değeri olan (verisi olan) göstergeleri filtrele
       final valid = indicators.where((i) => i.lastValue != null).toList();
+
+      if (!mounted) return; // EKRAN KAPANDIYSA İŞLEMİ DURDUR
 
       setState(() {
         _allIndicators = indicators;
@@ -62,12 +63,14 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
         }
       });
     } catch (e) {
+      if (!mounted) return; // EKRAN KAPANDIYSA İŞLEMİ DURDUR
       setState(() {
         _error = 'Göstergeler yüklenemedi: $e';
         _loadingIndicators = false;
       });
     }
   }
+
 
   /// Periyotları genişten dara dener, veri bulana kadar
   Future<List<TimeSeries>> _fetchWithFallback(List<int> ids) async {
@@ -124,6 +127,8 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
         [_indicatorA!.id, _indicatorB!.id],
       );
 
+      if (!mounted) return;
+
       if (series.isEmpty || series.every((s) => s.data.isEmpty)) {
         setState(() {
           _error = 'Her iki gösterge için de hiçbir periyotta veri bulunamadı.';
@@ -173,6 +178,8 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
         } catch (_) {}
       }
 
+      if (!mounted) return;
+
       setState(() {
         _overlayConfig = overlayConfig;
         _scatterConfig = scatterConfig;
@@ -180,6 +187,7 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
         _isAnalyzing = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Veri çekme hatası: $e';
         _isAnalyzing = false;
@@ -343,6 +351,7 @@ class _ComparisonScreenState extends State<ComparisonScreen> {
                       height: 350,
                       darkMode: isDark,
                     ),
+                    const SizedBox(height: 32),
                   ],
 
                   const SizedBox(height: 32),
