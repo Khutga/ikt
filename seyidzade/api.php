@@ -25,7 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
  * GET /api.php?action=search&q=enflasyon       → Gösterge arama
  * POST /api.php?action=analyze                 → Python mikroservisine analiz isteği (proxy)
  */
-
+set_time_limit(300); // İşlem süresini 5 dakikaya çıkarır (Varsayılan genelde 30 saniyedir)
+ini_set('max_execution_time', 300);
+ini_set('memory_limit', '512M'); // Veya bellek miktarınıza göre '1G'
+ini_set('default_socket_timeout', 300);
 // CORS & Temel Ayarlar
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');

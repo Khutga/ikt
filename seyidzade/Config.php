@@ -39,7 +39,7 @@ return [
 
     // Python Mikroservis Ayarları
     'python_service' => [
-        'base_url' => getenv('PYTHON_SERVICE_URL') ?: 'http://localhost:8001',
+        'base_url' => 'https://macro-api-ziul.onrender.com',
         'timeout'  => 30, // saniye
     ],
 

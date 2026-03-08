@@ -13,7 +13,7 @@ class EconometricsApiService {
   EconometricsApiService._internal();
 
   final String _baseUrl = AppConfig.apiBaseUrl;
-  final Duration _timeout = const Duration(seconds: 120); // Uzun analizler için
+  final Duration _timeout = const Duration(seconds: 600); // Uzun analizler için
 
   /// Desteklenen ekonometrik yöntemler listesi
   static const List<EconMethod> methods = [
@@ -137,7 +137,11 @@ class EconometricsApiService {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
 
       if (data.containsKey('error')) {
-        throw EconException(data['error'] ?? data['message'] ?? 'Bilinmeyen hata');
+        String errorMessage = data['error'] ?? data['message'] ?? 'Bilinmeyen hata';
+        if (data.containsKey('detail') && data['detail'] != null && data['detail'].toString().isNotEmpty) {
+           errorMessage += '\nDetay: ${data['detail']}';
+        }
+        throw EconException(errorMessage);
       }
 
       return data['data'] ?? data;
