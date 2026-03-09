@@ -13,7 +13,7 @@ class EconometricsApiService {
   EconometricsApiService._internal();
 
   final String _baseUrl = AppConfig.apiBaseUrl;
-  final Duration _timeout = const Duration(seconds: 600); // Uzun analizler için
+  final Duration _timeout = const Duration(seconds: 600);
 
   /// Desteklenen ekonometrik yöntemler listesi
   static const List<EconMethod> methods = [
@@ -110,12 +110,18 @@ class EconometricsApiService {
     Map<String, dynamic> params = const {},
     int dependentIndex = 0,
   }) async {
-    final body = {
+    // ★ FIX: PHP json_decode('{}', true) = [] sorunu
+    // params boşsa hiç gönderme, Python kendi default {} kullanır.
+    // params doluysa gönder.
+    final body = <String, dynamic>{
       'method': method,
       'series_data': seriesData,
-      'params': params,
       'dependent_index': dependentIndex,
     };
+
+    if (params.isNotEmpty) {
+      body['params'] = params;
+    }
 
     final uri = Uri.parse(_baseUrl).replace(
       queryParameters: {'action': 'econometrics'},

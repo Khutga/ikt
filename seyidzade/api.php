@@ -65,13 +65,13 @@ try {
         'fetch' => triggerFetch(),
         'econometrics' => proxyToEconometrics(),
         'stats' => getSystemStats($db),
-        'countries'       => getCountries(),
-    'intl_indicators' => getIntlIndicators(),
-    'intl_compare'    => getIntlComparison(),
-    'intl_latest'     => getIntlLatest(),
-    'sustainability'  => getSustainabilityDashboard(),
-    'intl_fetch'      => triggerIntlFetch(),
-    'intl_fetch_all'  => triggerIntlFetchAll(),
+        'countries' => getCountries(),
+        'intl_indicators' => getIntlIndicators(),
+        'intl_compare' => getIntlComparison(),
+        'intl_latest' => getIntlLatest(),
+        'sustainability' => getSustainabilityDashboard(),
+        'intl_fetch' => triggerIntlFetch(),
+        'intl_fetch_all' => triggerIntlFetchAll(),
         default => [
             'error' => 'Geçersiz action',
             'available_actions' => [
@@ -615,13 +615,16 @@ function getIntlIndicators(): array
 function getIntlComparison(): array
 {
     $indicatorId = isset($_GET['indicator']) ? (int) $_GET['indicator'] : 0;
-    if (!$indicatorId) return ['error' => 'indicator parametresi gerekli'];
+    if (!$indicatorId)
+        return ['error' => 'indicator parametresi gerekli'];
 
     $countriesParam = $_GET['countries'] ?? 'TUR,USA,DEU';
     $countryCodes = array_filter(array_map('trim', explode(',', $countriesParam)));
 
-    if (empty($countryCodes)) return ['error' => 'countries parametresi gerekli'];
-    if (count($countryCodes) > 10) return ['error' => 'En fazla 10 ülke karşılaştırılabilir'];
+    if (empty($countryCodes))
+        return ['error' => 'countries parametresi gerekli'];
+    if (count($countryCodes) > 10)
+        return ['error' => 'En fazla 10 ülke karşılaştırılabilir'];
 
     $startYear = isset($_GET['start']) ? (int) $_GET['start'] : 2000;
     $endYear = isset($_GET['end']) ? (int) $_GET['end'] : (int) date('Y');
@@ -796,7 +799,8 @@ function getSustainabilityDashboard(): array
 function triggerIntlFetch(): array
 {
     $id = isset($_GET['indicator']) ? (int) $_GET['indicator'] : 0;
-    if (!$id) return ['error' => 'indicator parametresi gerekli'];
+    if (!$id)
+        return ['error' => 'indicator parametresi gerekli'];
 
     $wb = new WorldBankService();
     return $wb->fetchIndicatorData($id);
@@ -812,36 +816,13 @@ function triggerIntlFetchAll(): array
     return ['success' => true, 'results' => $wb->fetchAllActive()];
 }
 
-/**
- * api.php'ye eklenecek ekonometri endpoint kodu
- *
- * ─────────────────────────────────────────────────
- * 1. Router'a ekleyin (match bloğuna):
- * ─────────────────────────────────────────────────
- *
- *   'econometrics' => proxyToEconometrics(),
- *
- * ─────────────────────────────────────────────────
- * 2. Bu fonksiyonu api.php'nin sonuna ekleyin:
- * ─────────────────────────────────────────────────
- */
 
-/**
- * POST /api.php?action=econometrics
- * Python ekonometri servisine proxy
- * 
- * Body: {
- *   "method": "unit_root|cointegration|granger|var_model|ardl|garch|ols|descriptive|full_analysis",
- *   "series_data": [...],   // Seri verileri (indicator_ids varsa DB'den çekilir)
- *   "params": {},
- *   "dependent_index": 0
- * }
- */
+
 function proxyToEconometrics(): array
 {
     $config = require __DIR__ . '/config/config.php';
     $pythonUrl = $config['python_service']['base_url'];
-    $timeout = 120; // Ekonometrik analizler uzun sürebilir
+    $timeout = 120;
 
     $body = file_get_contents('php://input');
     $requestData = json_decode($body, true);
@@ -852,11 +833,87 @@ function proxyToEconometrics(): array
 
     $db = Database::getConnection();
 
-    // ── Eğer series_data yerine indicator_ids geliyorsa, veriyi DB'den çek ──
-    if (isset($requestData['indicator_ids']) && !isset($requestData['series_data'])) {
+    // ═══════════════════════════════════════════
+    //  SENARYO 1: series_data zaten hazır geliyorsa (Flutter'dan)
+    //  → Doğrudan Python'a gönder
+    // ═══════════════════════════════════════════
+
+    if (isset($requestData['series_data']) && !empty($requestData['series_data'])) {
+        // series_data hazır, direkt devam et
+    }
+
+    // ═══════════════════════════════════════════
+    //  SENARYO 2: intl_indicator_id + country_codes geliyorsa
+    //  → Dünya Bankası verisini DB'den çek ve series_data'ya dönüştür
+    // ═══════════════════════════════════════════
+    elseif (isset($requestData['intl_indicator_id']) && isset($requestData['country_codes'])) {
+        $intlIndicatorId = (int) $requestData['intl_indicator_id'];
+        $countryCodes = $requestData['country_codes'];
+        $startYear = $requestData['start_year'] ?? 2000;
+        $endYear = $requestData['end_year'] ?? (int) date('Y');
+
+        if (!is_array($countryCodes) || empty($countryCodes)) {
+            return ['error' => 'country_codes boş olamaz'];
+        }
+
+        // Gösterge bilgisi
+        $stmt = $db->prepare("SELECT * FROM international_indicators WHERE id = ? AND is_active = 1");
+        $stmt->execute([$intlIndicatorId]);
+        $indicator = $stmt->fetch();
+
+        if (!$indicator) {
+            return ['error' => 'Uluslararası gösterge bulunamadı (id: ' . $intlIndicatorId . ')'];
+        }
+
+        // Her ülke için veri çek → series_data formatına dönüştür
+        $seriesData = [];
+        $placeholders = str_repeat('?,', count($countryCodes) - 1) . '?';
+        $stmt = $db->prepare(
+            "SELECT id, iso_code, name_tr, flag_emoji FROM countries WHERE iso_code IN ($placeholders) AND is_active = 1"
+        );
+        $stmt->execute($countryCodes);
+        $countries = $stmt->fetchAll();
+
+        foreach ($countries as $country) {
+            $stmt = $db->prepare("
+                SELECT idp.date, idp.value
+                FROM international_data_points idp
+                WHERE idp.intl_indicator_id = ?
+                  AND idp.country_id = ?
+                  AND YEAR(idp.date) BETWEEN ? AND ?
+                ORDER BY idp.date ASC
+            ");
+            $stmt->execute([$intlIndicatorId, $country['id'], $startYear, $endYear]);
+            $dataPoints = $stmt->fetchAll();
+
+            if (empty($dataPoints))
+                continue;
+
+            $flag = $country['flag_emoji'] ?? '';
+            $seriesData[] = [
+                'indicator_id' => $intlIndicatorId,
+                'name' => trim("$flag {$country['name_tr']} - {$indicator['name_tr']}"),
+                'code' => "{$country['iso_code']}_{$indicator['source_code']}",
+                'unit' => $indicator['unit'] ?? '',
+                'data' => $dataPoints,
+            ];
+        }
+
+        if (empty($seriesData)) {
+            return ['error' => 'Seçilen ülkeler için uluslararası veri bulunamadı'];
+        }
+
+        $requestData['series_data'] = $seriesData;
+    }
+
+    // ═══════════════════════════════════════════
+    //  SENARYO 3: indicator_ids geliyorsa (mevcut TCMB davranışı)
+    //  → TCMB verisini DB'den çek
+    // ═══════════════════════════════════════════
+    elseif (isset($requestData['indicator_ids']) && !isset($requestData['series_data'])) {
         $period = $requestData['period'] ?? '5y';
         $seriesData = [];
-        
+
         foreach ($requestData['indicator_ids'] as $id) {
             $stmt = $db->prepare("SELECT i.name_tr, i.evds_code, i.unit FROM indicators i WHERE i.id = ?");
             $stmt->execute([$id]);
@@ -889,12 +946,26 @@ function proxyToEconometrics(): array
         $requestData['series_data'] = $seriesData;
     }
 
-    // ── Cache kontrolü ──
+    // series_data hâlâ yoksa hata
+    if (!isset($requestData['series_data']) || empty($requestData['series_data'])) {
+        return ['error' => 'series_data, indicator_ids veya intl_indicator_id + country_codes gerekli'];
+    }
+
+    // ★ FIX: PHP json_decode('{}', true) boş array [] döner,
+    // Python dict bekler. Boş params'ı stdClass'a çevir → json_encode {} üretir.
+    if (!isset($requestData['params']) || empty($requestData['params']) || $requestData['params'] === []) {
+        $requestData['params'] = new stdClass();
+    }
+
+    // ═══════════════════════════════════════════
+    //  CACHE KONTROLÜ
+    // ═══════════════════════════════════════════
+
     $cacheKey = md5(json_encode([
         'econometrics',
         $requestData['method'],
-        $requestData['series_data'] ?? [],
-        $requestData['params'] ?? [],
+        $requestData['series_data'],
+        $requestData['params'] ?? new stdClass(),
     ]));
 
     $stmt = $db->prepare(
@@ -909,7 +980,10 @@ function proxyToEconometrics(): array
         return ['success' => true, 'data' => $result];
     }
 
-    // ── Python servisine gönder ──
+    // ═══════════════════════════════════════════
+    //  PYTHON SERVİSİNE GÖNDER
+    // ═══════════════════════════════════════════
+
     $ch = curl_init($pythonUrl . '/econometrics');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -928,7 +1002,7 @@ function proxyToEconometrics(): array
         return [
             'error' => 'Python servisi ile bağlantı kurulamadı',
             'detail' => $curlError,
-            'hint' => 'Python servisinin çalıştığından emin olun: uvicorn app.main:app --port 8001',
+            'hint' => 'Python servisinin çalıştığından emin olun (Render.com dashboard kontrol edin)',
         ];
     }
 
@@ -946,7 +1020,10 @@ function proxyToEconometrics(): array
 
     $result = json_decode($response, true);
 
-    // ── Cache'e yaz (ekonometrik analizler için 2 saat) ──
+    // ═══════════════════════════════════════════
+    //  CACHE'E YAZ
+    // ═══════════════════════════════════════════
+
     try {
         $stmt = $db->prepare("
             INSERT INTO analysis_cache (cache_key, analysis_type, indicator_ids, parameters, result, expires_at)
@@ -955,15 +1032,18 @@ function proxyToEconometrics(): array
         ");
         $stmt->execute([
             $cacheKey,
-            'statistics', // enum değeri — DB şeması genişletilmeli veya 'statistics' kullanılmalı
-            json_encode($requestData['indicator_ids'] ?? []),
+            'statistics',
+            json_encode($requestData['indicator_ids'] ?? $requestData['intl_indicator_id'] ?? []),
             json_encode($requestData['params'] ?? []),
             json_encode($result),
         ]);
     } catch (Exception $e) {
-        // Cache yazma hatası analizi engellemez
         error_log("Econometrics cache write error: " . $e->getMessage());
     }
 
     return ['success' => true, 'data' => $result];
 }
+
+
+
+
